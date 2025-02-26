@@ -5,9 +5,12 @@ from ensemble import perform_ensemble
 import pandas as pd
 import numpy as np
 from spatial_test_train_split import perform_splits
-
+from unet import preprocess_unet_data, build_unet, plot_unet_heatmap
 import matplotlib.pyplot as plt
+from keras.callbacks import EarlyStopping
+import sys
 
+sys.stdout.reconfigure(encoding='utf-8')
 
 def evaluate_predictions(y_true, y_pred):
     """
@@ -101,6 +104,72 @@ def do_Ensemble(size, this_train_random=0, this_test_random=0, this_train_block=
     print(rf_random_mae, rf_random_rmse, rf_block_mae, rf_block_rmse, xg_random_mae, xg_random_rmse, xg_block_mae, xg_block_rmse, lg_random_mae, lg_random_rmse, lg_block_mae, lg_block_rmse, ens_random_mae, ens_random_rmse, ens_block_mae, ens_block_rmse)
 
     return rf_random_mae, rf_random_rmse, rf_block_mae, rf_block_rmse, xg_random_mae, xg_random_rmse, xg_block_mae, xg_block_rmse, lg_random_mae, lg_random_rmse, lg_block_mae, lg_block_rmse, ens_random_mae, ens_random_rmse, ens_block_mae, ens_block_rmse
+
+# def train_unet(train_df, epochs=10):
+#     """
+#     Train U-Net on the given dataset.
+    
+#     Args:
+#         train_df: DataFrame containing training data.
+#         epochs: Number of epochs to train for.
+    
+#     Returns:
+#         Trained U-Net model.
+#     """
+#     X_train, Y_train = preprocess_unet_data(train_df)
+    
+#     model = build_unet(input_shape=(64, 64, 3))
+#     model.fit(X_train, np.expand_dims(Y_train, axis=0), epochs=epochs, verbose=1)
+    
+#     return model
+def train_unet(train_df, epochs=25):
+    """
+    Train the improved U-Net model.
+    
+    Args:
+        train_df: DataFrame containing training data.
+        epochs: Number of epochs to train.
+    
+    Returns:
+        Trained U-Net model.
+    """
+    # Normalize signal strength to range [-1, 1]
+    train_df["rssi"] = (train_df["rssi"] - train_df["rssi"].mean()) / train_df["rssi"].std()
+    
+
+    X_train, Y_train = preprocess_unet_data(train_df)
+    
+    model = build_unet(input_shape=(64, 64, 3))
+
+    # Early stopping to avoid overfitting
+    early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+
+    model.fit(X_train, np.expand_dims(Y_train, axis=0), 
+              epochs=epochs, verbose=1, callbacks=[early_stopping])
+
+    return model
+
+def evaluate_unet(model, test_df):
+    """
+    Evaluate the improved U-Net model on test data.
+    
+    Args:
+        model: Trained U-Net model.
+        test_df: DataFrame containing test data.
+    
+    Returns:
+        MAE and RMSE.
+    """
+    test_df["rssi"] = (test_df["rssi"] - test_df["rssi"].mean()) / test_df["rssi"].std()
+    X_test, Y_test = preprocess_unet_data(test_df)
+    predictions = model.predict(X_test)[0, :, :, 0]  # Extract 2D output
+
+    mae = np.mean(np.abs(Y_test - predictions))
+    rmse = np.sqrt(np.mean((Y_test - predictions) ** 2))
+
+    return mae, rmse
+
+
 
 
 def evaluation_instance(file_name="placeholder"):
@@ -323,7 +392,7 @@ def evaluation_sequence(file_name="", runs=20):
 
 def evaluation_seq_2(file_name="", runs=20):
     test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
-    methods = ["IDW", "Kriging", "RF", "XGBoost", "LightGBM", "Ensemble"]
+    methods = ["IDW", "Kriging", "RF", "XGBoost", "LightGBM", "Ensemble", "U-Net"] 
 
     # Data storage for visualization
     error_data_random = []
@@ -339,6 +408,8 @@ def evaluation_seq_2(file_name="", runs=20):
                 this_n_clusters=10, 
                 this_test_fraction=test_size
             )
+
+
 
             # IDW
             rand_mae, _, block_mae, _ = do_IDW(test_size, train_random, test_random, train_block, test_block)
@@ -368,6 +439,37 @@ def evaluation_seq_2(file_name="", runs=20):
             error_data_block.append(["LightGBM", test_size, lg_block_mae])
             error_data_block.append(["Ensemble", test_size, ens_block_mae])
 
+           # Inside evaluation_seq_2()
+            unet_model = train_unet(train_random)  # Train on random split
+            unet_rand_mae, _ = evaluate_unet(unet_model, test_random)  # Evaluate on random test set
+            unet_block_mae, _ = evaluate_unet(unet_model, test_block)  # Evaluate on block test set
+
+            error_data_random.append(["U-Net", test_size, unet_rand_mae])
+            error_data_block.append(["U-Net", test_size, unet_block_mae])
+
+
+            if test_size >= 0.6: 
+                # Generate Heatmaps
+                X_test, Y_test = preprocess_unet_data(test_random)  # Convert test data into a grid
+                predictions = unet_model.predict(X_test)[0, :, :, 0]  # Extract predicted signal values
+
+                plot_unet_heatmap(test_random, predictions, title=f"U-Net Heatmap (Random Split, Test Size {test_size})")
+
+                X_test, Y_test = preprocess_unet_data(test_block)
+                predictions = unet_model.predict(X_test)[0, :, :, 0]
+
+                plot_unet_heatmap(test_block, predictions, title=f"U-Net Heatmap (Block Split, Test Size {test_size})")
+
+                sns.histplot(train_random["rssi"], kde=True, color="blue", label="Train")
+                sns.histplot(test_random["rssi"], kde=True, color="red", label="Test", alpha=0.6)
+                sns.histplot(train_block["rssi"], kde=True, color="blue", label="B Train")
+                sns.histplot(test_block["rssi"], kde=True, color="red", label="B Test", alpha=0.6)
+                plt.legend()
+                plt.show()
+
+            error_data_random.append(["U-Net", test_size, unet_rand_mae])
+            error_data_block.append(["U-Net", test_size, unet_block_mae])
+
     # Convert to DataFrame for easier plotting
     df_random = pd.DataFrame(error_data_random, columns=["Method", "Test Size", "MAE"])
     df_block = pd.DataFrame(error_data_block, columns=["Method", "Test Size", "MAE"])
@@ -395,4 +497,4 @@ def evaluation_seq_2(file_name="", runs=20):
 if __name__ == '__main__':
     # evaluation_instance(file_name="CONF/cleaned_rows.csv")
     # evaluation_sequence(file_name="CONF/cleaned_spiral.csv", runs=20)
-    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=20))
+    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=10))
