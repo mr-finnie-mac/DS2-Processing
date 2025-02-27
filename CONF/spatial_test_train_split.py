@@ -80,7 +80,7 @@ def visualize_splits(train_random, test_random, train_block, test_block):
 
 
 
-def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clusters = 10, this_test_fraction = 0.2):
+def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clusters = 9, this_test_fraction = 0.2):
     # Load dataset (modify path as needed)
     this_df = pd.read_csv(filename)
 

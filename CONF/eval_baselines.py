@@ -9,6 +9,8 @@ from unet import preprocess_unet_data, build_unet, plot_unet_heatmap
 import matplotlib.pyplot as plt
 from keras.callbacks import EarlyStopping
 import sys
+from transformer import train_gaussian_transformer, evaluate_gaussian_transformer, generate_gaussian_features
+from gaussian import compute_anisotropic_covariance, adaptively_cluster_points, create_gaussian_representation
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -122,7 +124,7 @@ def do_Ensemble(size, this_train_random=0, this_test_random=0, this_train_block=
 #     model.fit(X_train, np.expand_dims(Y_train, axis=0), epochs=epochs, verbose=1)
     
 #     return model
-def train_unet(train_df, epochs=25):
+def train_unet(train_df, epochs=5):
     """
     Train the improved U-Net model.
     
@@ -168,6 +170,71 @@ def evaluate_unet(model, test_df):
     rmse = np.sqrt(np.mean((Y_test - predictions) ** 2))
 
     return mae, rmse
+
+
+def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0):
+    """
+    Executes the Gaussian Splatting + Transformer method on the dataset.
+    """
+    
+    print("Available columns in train_random before filtering:", this_train_random.columns)
+
+    # 🛠 Define all necessary columns
+    cols_needed = ["gps.lat", "gps.lon", "altitudeAMSL", "localPosition.x", "localPosition.y", "localPosition.z",
+                   "rsrp", "rsrq", "rssi", "sinr"]
+    this_train_random = this_train_random[cols_needed].copy()
+    this_test_random = this_test_random[cols_needed].copy()
+    
+    # Check for missing columns in training and testing data
+    missing_train_cols = set(cols_needed) - set(this_train_random.columns)
+    missing_test_cols = set(cols_needed) - set(this_test_random.columns)
+    
+    if missing_train_cols:
+        raise KeyError(f"Missing columns in training data: {missing_train_cols}")
+    if missing_test_cols:
+        raise KeyError(f"Missing columns in testing data: {missing_test_cols}")
+
+    # 🛠 Filter only the required columns
+    this_train_random = this_train_random[cols_needed]
+    this_test_random = this_test_random[cols_needed]
+    this_train_block = this_train_block[cols_needed]
+    this_test_block = this_test_block[cols_needed]
+
+    print("Filtered train_random columns:", this_train_random.columns)
+
+    # Continue with the normal pipeline
+    train_random_gaussians = create_gaussian_representation(this_train_random)
+    test_random_gaussians = create_gaussian_representation(this_test_random)
+
+    train_random_features = generate_gaussian_features(train_random_gaussians)
+    test_random_features = generate_gaussian_features(test_random_gaussians)
+
+    # Train the Gaussian Transformer model for random data
+    splatformer_random_model = train_gaussian_transformer(features=train_random_features, train_data=this_train_random, test_data=this_test_random)
+    
+    # Set the model to evaluation mode before evaluation
+    splatformer_random_model.eval()  
+
+    # Evaluate the model
+    splatformer_rand_mae = evaluate_gaussian_transformer(splatformer_random_model, this_test_random, test_random_features)
+
+    # Process block data
+    train_block_gaussians = create_gaussian_representation(this_train_block)
+    test_block_gaussians = create_gaussian_representation(this_test_block)
+
+    train_block_features = generate_gaussian_features(train_block_gaussians)
+    test_block_features = generate_gaussian_features(test_block_gaussians)
+
+    # Train the Gaussian Transformer model for block data
+    splatformer_block_model = train_gaussian_transformer(features=train_block_features, train_data=this_train_block, test_data=this_test_block)
+    
+    # Set the block model to evaluation mode before evaluation
+    splatformer_block_model.eval()  
+
+    # Evaluate the model
+    splatformer_block_mae = evaluate_gaussian_transformer(splatformer_block_model, this_test_block, test_block_features)
+
+    return splatformer_rand_mae, splatformer_block_mae
 
 
 
@@ -391,8 +458,9 @@ def evaluation_sequence(file_name="", runs=20):
 
 
 def evaluation_seq_2(file_name="", runs=20):
-    test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
-    methods = ["IDW", "Kriging", "RF", "XGBoost", "LightGBM", "Ensemble", "U-Net"] 
+    # test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+    test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
+    methods = ["IDW", "Kriging", "RF", "XGBoost", "LightGBM", "Ensemble", "U-Net", "[OURS] Splatformer"] 
 
     # Data storage for visualization
     error_data_random = []
@@ -408,8 +476,6 @@ def evaluation_seq_2(file_name="", runs=20):
                 this_n_clusters=10, 
                 this_test_fraction=test_size
             )
-
-
 
             # IDW
             rand_mae, _, block_mae, _ = do_IDW(test_size, train_random, test_random, train_block, test_block)
@@ -439,7 +505,16 @@ def evaluation_seq_2(file_name="", runs=20):
             error_data_block.append(["LightGBM", test_size, lg_block_mae])
             error_data_block.append(["Ensemble", test_size, ens_block_mae])
 
-           # Inside evaluation_seq_2()
+            # print(train_random)
+            # Gaussian Splatting + Transformer
+            splatformer_rand_mae, splatformer_block_mae = do_splatformer(
+                test_size, train_random, test_random, train_block, test_block
+            )
+
+            error_data_random.append(["Splatformer", test_size, splatformer_rand_mae])
+            error_data_block.append(["Splatformer", test_size, splatformer_block_mae])
+
+           # U-Net CNNN
             unet_model = train_unet(train_random)  # Train on random split
             unet_rand_mae, _ = evaluate_unet(unet_model, test_random)  # Evaluate on random test set
             unet_block_mae, _ = evaluate_unet(unet_model, test_block)  # Evaluate on block test set
@@ -474,8 +549,29 @@ def evaluation_seq_2(file_name="", runs=20):
     df_random = pd.DataFrame(error_data_random, columns=["Method", "Test Size", "MAE"])
     df_block = pd.DataFrame(error_data_block, columns=["Method", "Test Size", "MAE"])
 
-    # Plot function using violin plots
+    print("Random DataFrame:")
+    print(df_random)
+    print(df_random.dtypes)
+
+    print("Block DataFrame:")
+    print(df_block)
+    print(df_block.dtypes)
+
+    df_random['Method'] = df_random['Method'].astype('category')
+    df_random['Test Size'] = df_random['Test Size'].astype('category')
+
+    df_block['Method'] = df_block['Method'].astype('category')
+    df_block['Test Size'] = df_block['Test Size'].astype('category')
+
+
+    df_random.to_csv('df_randomout.csv', index=False) 
+    df_block.to_csv('df_blockout.csv', index=False) 
+
     def plot_violin(df, title):
+        # Ensure that columns are treated as categorical
+        df['Method'] = df['Method'].astype('category')
+        df['Test Size'] = df['Test Size'].astype('category')
+
         plt.figure(figsize=(12, 6))
         sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile")
         plt.title(title, fontsize=14)
@@ -485,10 +581,8 @@ def evaluation_seq_2(file_name="", runs=20):
         plt.grid(True)
         plt.show()
 
-    # Plot Random Split Results
+    # Now run your plotting
     plot_violin(df_random, "Performance of Methods (Random Split)")
-
-    # Plot Block Split Results
     plot_violin(df_block, "Performance of Methods (Block Split)")
 
     return df_random, df_block
@@ -497,4 +591,4 @@ def evaluation_seq_2(file_name="", runs=20):
 if __name__ == '__main__':
     # evaluation_instance(file_name="CONF/cleaned_rows.csv")
     # evaluation_sequence(file_name="CONF/cleaned_spiral.csv", runs=20)
-    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=10))
+    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=5))
