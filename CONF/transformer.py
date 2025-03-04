@@ -20,7 +20,7 @@ class GaussianTransformer(nn.Module):
         return self.decoder(x)
     
 
-def generate_gaussian_features(data):
+def generate_gaussian_features_old(data):
     """
     Extracts relevant Gaussian features for transformer input.
     
@@ -50,7 +50,26 @@ def generate_gaussian_features(data):
     
     return features
 
-def train_gaussian_transformer(features, train_data, test_data, epochs=5, lr=0.001):
+from sklearn.preprocessing import StandardScaler
+
+def generate_gaussian_features(data):
+    """Ensure input data is a DataFrame before feature scaling."""
+
+    # Convert to DataFrame if necessary
+    if not isinstance(data, pd.DataFrame):
+        data = pd.DataFrame(data)  # Convert list/array to DataFrame
+
+    feature_cols = data.columns  # Get column names dynamically
+
+    # Normalize transformer input
+    scaler = StandardScaler()
+    data[feature_cols] = scaler.fit_transform(data[feature_cols])  
+
+    return data.values  # Return NumPy array for transformer model
+
+
+
+def train_gaussian_transformer(features, train_data, test_data, epochs=20, lr=0.001):
     # Ensure input is a DataFrame
     if isinstance(train_data, np.ndarray):
         train_data = pd.DataFrame(train_data)
@@ -65,7 +84,8 @@ def train_gaussian_transformer(features, train_data, test_data, epochs=5, lr=0.0
     gaussians = features
 
     # Verify shape of generated features
-    print("Shape of generated Gaussian features:", [g.shape for g in gaussians])
+    print("Shape of generated Gaussian features:", [g.shape for g in gaussians], len(gaussians))
+    print("Compsition of a gaussain feature: ", gaussians[10])
 
     # Create input tensor for training
     X_train = torch.tensor([np.hstack([g[0], g[2]]) for g in gaussians], dtype=torch.float32)

@@ -4,6 +4,7 @@ from sklearn.model_selection import train_test_split
 from scipy.spatial import KDTree
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
 
 # # Load dataset (modify path as needed)
 # df = pd.read_csv("CONF/cleaned_spiral.csv")
@@ -78,11 +79,22 @@ def visualize_splits(train_random, test_random, train_block, test_block):
     plt.tight_layout()
     plt.show()
 
+def normalize_dataset(df):
+    """Normalize key features in the dataset using StandardScaler"""
+    scaler = StandardScaler()
+    feature_cols = ["gps.lat", "gps.lon", "altitudeAMSL", "localPosition.x", 
+                    "localPosition.y", "localPosition.z", "rsrp", "rssi", "sinr", "rsrq"]
+    
+    df[feature_cols] = scaler.fit_transform(df[feature_cols])  # Apply normalization
+    return df, scaler  # Return scaler in case we need to inverse transform later
 
 
 def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clusters = 9, this_test_fraction = 0.2):
     # Load dataset (modify path as needed)
     this_df = pd.read_csv(filename)
+
+    # Apply normalization
+    df, scaler = normalize_dataset(this_df)
 
     # Extract relevant columns (position + signal strength)
     position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
@@ -104,7 +116,7 @@ def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clus
     # visualize_splits(train_random, test_random, train_block, test_block) # if want to see the distibution of test and train points
 
 
-    return train_random, test_random, train_block, test_block
+    return train_random, test_random, train_block, test_block, scaler
 
 
 # train_random, test_random, train_block, test_block = perform_splits(filename="CONF/cleaned_spiral.csv",  this_test_size=0.2, this_n_clusters = 10, this_test_fraction = 0.2)

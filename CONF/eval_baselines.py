@@ -4,6 +4,8 @@ from krig import perform_Krig
 from ensemble import perform_ensemble
 import pandas as pd
 import numpy as np
+import seaborn as sns
+from mpl_toolkits.mplot3d import Axes3D
 from spatial_test_train_split import perform_splits
 from unet import preprocess_unet_data, build_unet, plot_unet_heatmap
 import matplotlib.pyplot as plt
@@ -124,7 +126,7 @@ def do_Ensemble(size, this_train_random=0, this_test_random=0, this_train_block=
 #     model.fit(X_train, np.expand_dims(Y_train, axis=0), epochs=epochs, verbose=1)
     
 #     return model
-def train_unet(train_df, epochs=5):
+def train_unet(train_df, epochs=20):
     """
     Train the improved U-Net model.
     
@@ -457,10 +459,14 @@ def evaluation_sequence(file_name="", runs=20):
     return df_summary, errors
 
 
+
+
 def evaluation_seq_2(file_name="", runs=20):
     # test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
     test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
-    methods = ["IDW", "Kriging", "RF", "XGBoost", "LightGBM", "Ensemble", "U-Net", "[OURS] Splatformer"] 
+    methods = ["IDW", "Kriging", "Ensemble", "U-Net", "[OURS] Splatformer"] 
+
+    # methods = ["IDW", "Kriging", "RF", "XGBoost", "LightGBM", "Ensemble", "U-Net", "[OURS] Splatformer"] 
 
     # Data storage for visualization
     error_data_random = []
@@ -470,10 +476,10 @@ def evaluation_seq_2(file_name="", runs=20):
         print(f"Processing test size: {test_size}")
 
         for _ in range(runs):
-            train_random, test_random, train_block, test_block = perform_splits(
+            train_random, test_random, train_block, test_block, scaler = perform_splits(
                 filename="CONF/cleaned_spiral.csv",
                 this_test_size=test_size, 
-                this_n_clusters=10, 
+                this_n_clusters=20, 
                 this_test_fraction=test_size
             )
 
@@ -495,26 +501,17 @@ def evaluation_seq_2(file_name="", runs=20):
                 test_size, train_random, test_random, train_block, test_block
             )
 
-            error_data_random.append(["RF", test_size, rf_rand_mae])
-            error_data_random.append(["XGBoost", test_size, xg_rand_mae])
-            error_data_random.append(["LightGBM", test_size, lg_rand_mae])
+            # error_data_random.append(["RF", test_size, rf_rand_mae])
+            # error_data_random.append(["XGBoost", test_size, xg_rand_mae])
+            # error_data_random.append(["LightGBM", test_size, lg_rand_mae])
             error_data_random.append(["Ensemble", test_size, ens_rand_mae])
 
-            error_data_block.append(["RF", test_size, rf_block_mae])
-            error_data_block.append(["XGBoost", test_size, xg_block_mae])
-            error_data_block.append(["LightGBM", test_size, lg_block_mae])
+            # error_data_block.append(["RF", test_size, rf_block_mae])
+            # error_data_block.append(["XGBoost", test_size, xg_block_mae])
+            # error_data_block.append(["LightGBM", test_size, lg_block_mae])
             error_data_block.append(["Ensemble", test_size, ens_block_mae])
 
-            # print(train_random)
-            # Gaussian Splatting + Transformer
-            splatformer_rand_mae, splatformer_block_mae = do_splatformer(
-                test_size, train_random, test_random, train_block, test_block
-            )
-
-            error_data_random.append(["Splatformer", test_size, splatformer_rand_mae])
-            error_data_block.append(["Splatformer", test_size, splatformer_block_mae])
-
-           # U-Net CNNN
+            # U-Net CNNN
             unet_model = train_unet(train_random)  # Train on random split
             unet_rand_mae, _ = evaluate_unet(unet_model, test_random)  # Evaluate on random test set
             unet_block_mae, _ = evaluate_unet(unet_model, test_block)  # Evaluate on block test set
@@ -522,6 +519,15 @@ def evaluation_seq_2(file_name="", runs=20):
             error_data_random.append(["U-Net", test_size, unet_rand_mae])
             error_data_block.append(["U-Net", test_size, unet_block_mae])
 
+
+            # print(train_random)
+            # Gaussian Splatting + Transformer
+            splatformer_rand_mae, splatformer_block_mae = do_splatformer(
+                test_size, train_random, test_random, train_block, test_block
+            )
+
+            error_data_random.append(["[OURS] Splatformer", test_size, splatformer_rand_mae])
+            error_data_block.append(["[OURS] Splatformer", test_size, splatformer_block_mae])
 
             if test_size >= 0.6: 
                 # Generate Heatmaps
@@ -581,14 +587,285 @@ def evaluation_seq_2(file_name="", runs=20):
         plt.grid(True)
         plt.show()
 
-    # Now run your plotting
-    plot_violin(df_random, "Performance of Methods (Random Split)")
-    plot_violin(df_block, "Performance of Methods (Block Split)")
+    def plot_results(df, title):
+        """
+        Plot both a violin plot and a line graph for MAE performance of different methods.
+
+        Args:
+            df: DataFrame containing results (Method, Test Size, MAE)
+            title: Title for the plot
+        """
+
+        # Ensure categorical data types for better plotting
+        df['Method'] = df['Method'].astype('category')
+        df['Test Size'] = df['Test Size'].astype(float)  # Convert to float for line plot
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+        # --- Violin Plot ---
+        sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile", ax=axes[0])
+        axes[0].set_title(f"{title} - Violin Plot", fontsize=14)
+        axes[0].set_xlabel("Test Size", fontsize=12)
+        axes[0].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
+        axes[0].legend(loc="upper left", bbox_to_anchor=(1, 1))
+        axes[0].grid(True)
+
+        # --- Line Plot ---
+        sns.lineplot(data=df, x="Test Size", y="MAE", hue="Method", marker="o", palette="Set1", ax=axes[1])
+        axes[1].set_title(f"{title} - Line Plot", fontsize=14)
+        axes[1].set_xlabel("Test Size", fontsize=12)
+        axes[1].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
+        axes[1].legend(loc="upper left", bbox_to_anchor=(1, 1))
+        axes[1].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+        # Now run your plotting
+        # plot_violin(df_random, "Performance of Methods (Random Split)")
+        # plot_violin(df_block, "Performance of Methods (Block Split)")
+
+
+    plot_results(df_random, "Performance of Methods (Random Split)")
+    plot_results(df_block, "Performance of Methods (Block Split)")
 
     return df_random, df_block
+
+def visualize_cross_dataset_predictions(train_df, test_df, predictions_dict):
+    """
+    Visualizes how well each method predicts test dataset values using a 3D plot.
+
+    Args:
+        train_df (pd.DataFrame): Training dataset (Lat, Lon, Alt, Signal).
+        test_df (pd.DataFrame): Test dataset (Lat, Lon, Alt, Signal).
+        predictions_dict (dict): Dictionary containing method-wise predicted values for the test set.
+                                Example: {"IDW": predicted_values, "Kriging": predicted_values, ...}
+    """
+
+    fig = plt.figure(figsize=(14, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Extract test set coordinates
+    x_test, y_test, z_test = test_df["gps.lat"], test_df["gps.lon"], test_df["altitudeAMSL"]
+    
+    # Extract training set coordinates
+    x_train, y_train, z_train = train_df["gps.lat"], train_df["gps.lon"], train_df["altitudeAMSL"]
+
+    # Plot training points (as small blue dots)
+    ax.scatter(x_train, y_train, z_train, color="blue", alpha=0.5, label="Training Data", s=10)
+
+    # Iterate through each method's predictions
+    for method, predicted_values in predictions_dict.items():
+        # Compute absolute error
+        abs_error = np.abs(predicted_values - test_df["rssi"].values)
+
+        # Normalize errors for color mapping
+        norm_error = (abs_error - abs_error.min()) / (abs_error.max() - abs_error.min())
+
+        # Scatter plot of test points, colored by error
+        scatter = ax.scatter(x_test, y_test, z_test, c=norm_error, cmap="coolwarm", label=f"{method} Prediction", s=40)
+
+        # Draw lines between predicted and actual values
+        for i in range(len(x_test)):
+            ax.plot([x_test.iloc[i], x_test.iloc[i]], 
+                    [y_test.iloc[i], y_test.iloc[i]], 
+                    [z_test.iloc[i], z_test.iloc[i] - (predicted_values[i] - test_df["rssi"].iloc[i])], 
+                    linestyle="dotted", color="black", alpha=0.5)
+
+    # Add colorbar for error representation
+    cbar = plt.colorbar(scatter, ax=ax, shrink=0.5, aspect=10)
+    cbar.set_label("Prediction Error (dB)")
+
+    # Labels and title
+    ax.set_xlabel("Latitude")
+    ax.set_ylabel("Longitude")
+    ax.set_zlabel("Altitude (m)")
+    ax.set_title("Cross-Dataset Prediction Accuracy in 3D Space")
+    ax.legend()
+
+    plt.show()
+
+
+def evaluate_cross_dataset(train_file, test_file, runs=5):
+    """
+    Evaluate model performance when training on one dataset (lower height)
+    and testing on another dataset (higher height).
+
+    Args:
+        train_file (str): CSV file path for training dataset.
+        test_file (str): CSV file path for testing dataset.
+        runs (int): Number of runs to average performance.
+
+    Returns:
+        DataFrame with evaluation results.
+    """
+    
+    methods = ["IDW", "Kriging", "Ensemble", "UNET CNN", "Splatformer"]
+    error_data_random = []
+    error_data_block = []
+    test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
+
+    for test_size in test_sizes:
+        print(f"Processing test size: {test_size}")
+
+        for _ in range(runs):
+            print(f"Running Cross-Dataset Evaluation (Train: {train_file}, Test: {test_file})")
+
+            # Load datasets
+            train_df = pd.read_csv(train_file)
+            test_df = pd.read_csv(test_file)
+
+            # Subset test dataset at its unique height
+            # test_height = test_df["localPosition.z"].unique()[0]
+            # test_subset = test_df[test_df["localPosition.z"] == test_height]
+
+            # Here we split up the test file only, we can use the same fucntion but only use the test split.
+            _, test_random, _ , test_block, scaler = perform_splits(
+                filename=test_file,  # Pass DataFrame directly
+                this_test_size=test_size, 
+                this_n_clusters=10, 
+                this_test_fraction=test_size
+            )
+
+            random_layer_test = test_random
+            block_layer_test = test_block
+
+            # IDW
+            rand_mae, _, block_mae, _ = do_IDW(test_size, train_df, random_layer_test, train_df, block_layer_test)
+            error_data_random.append(["IDW", test_size, rand_mae])
+            error_data_block.append(["IDW", test_size, block_mae])
+
+            # Kriging
+            rand_mae, _, block_mae, _ = do_Krig(test_size, train_df, random_layer_test, train_df, block_layer_test)
+            error_data_random.append(["Kriging", test_size, rand_mae])
+            error_data_block.append(["Kriging", test_size, block_mae])
+
+            # Ensemble Models
+            rf_rand_mae, _, rf_block_mae, _, \
+            xg_rand_mae, _, xg_block_mae, _, \
+            lg_rand_mae, _, lg_block_mae, _, \
+            ens_rand_mae, _, ens_block_mae, _ = do_Ensemble(test_size, train_df, random_layer_test, train_df, block_layer_test)
+            
+            # U-Net CNNN
+            unet_model = train_unet(train_df)  # Train on random split
+            unet_rand_mae, _ = evaluate_unet(unet_model, random_layer_test)  # Evaluate on random test set
+            unet_block_mae, _ = evaluate_unet(unet_model, block_layer_test)  # Evaluate on block test set
+
+            # Splatformer
+            splatformer_rand_mae, splatformer_block_mae = do_splatformer(
+                test_size, train_df, random_layer_test, train_df, block_layer_test
+            )
+
+            error_data_random.append(["RF", test_size, rf_rand_mae])
+            error_data_block.append(["RF", test_size, rf_block_mae])
+
+            error_data_random.append(["XGBoost", test_size, xg_rand_mae])
+            error_data_block.append(["XGBoost", test_size, xg_block_mae])
+
+            error_data_random.append(["LightGBM", test_size, lg_rand_mae])
+            error_data_block.append(["LightGBM", test_size, lg_block_mae])
+
+            error_data_random.append(["Ensemble", test_size, ens_rand_mae])
+            error_data_block.append(["Ensemble", test_size, ens_block_mae])
+
+            
+            error_data_random.append(["U-Net", test_size, unet_rand_mae])
+            error_data_block.append(["U-Net", test_size, unet_block_mae])
+
+            error_data_random.append(["Splatformer", test_size, splatformer_rand_mae])
+            error_data_block.append(["Splatformer", test_size, splatformer_block_mae])
+
+    # Convert results to DataFrame
+    # df_results = pd.DataFrame(error_data, columns=["Method", "Test Height", "MAE"])
+    
+    # Save to CSV
+    # df_results.to_csv("cross_dataset_results.csv", index=False)
+    # Convert to DataFrame for easier plotting
+    df_random = pd.DataFrame(error_data_random, columns=["Method", "Test Size", "MAE"])
+    df_block = pd.DataFrame(error_data_block, columns=["Method", "Test Size", "MAE"])
+
+    print("Random DataFrame:")
+    print(df_random)
+    print(df_random.dtypes)
+
+    print("Block DataFrame:")
+    print(df_block)
+    print(df_block.dtypes)
+
+    df_random['Method'] = df_random['Method'].astype('category')
+    df_random['Test Size'] = df_random['Test Size'].astype('category')
+
+    df_block['Method'] = df_block['Method'].astype('category')
+    df_block['Test Size'] = df_block['Test Size'].astype('category')
+
+
+    df_random.to_csv('layer_df_randomout.csv', index=False) 
+    df_block.to_csv('layer_df_blockout.csv', index=False) 
+
+    def plot_violin(df, title):
+        # Ensure that columns are treated as categorical
+        df['Method'] = df['Method'].astype('category')
+        df['Test Size'] = df['Test Size'].astype('category')
+
+        plt.figure(figsize=(12, 6))
+        sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile")
+        plt.title(title, fontsize=14)
+        plt.xlabel("Test Size", fontsize=12)
+        plt.ylabel("Mean Absolute Error (MAE)", fontsize=12)
+        plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
+        plt.grid(True)
+        plt.show()
+
+    def plot_results(df, title):
+        """
+        Plot both a violin plot and a line graph for MAE performance of different methods.
+
+        Args:
+            df: DataFrame containing results (Method, Test Size, MAE)
+            title: Title for the plot
+        """
+
+        # Ensure categorical data types for better plotting
+        df['Method'] = df['Method'].astype('category')
+        df['Test Size'] = df['Test Size'].astype(float)  # Convert to float for line plot
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+        # --- Violin Plot ---
+        sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile", ax=axes[0])
+        axes[0].set_title(f"{title} - Violin Plot", fontsize=14)
+        axes[0].set_xlabel("Test Size", fontsize=12)
+        axes[0].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
+        axes[0].legend(loc="upper left", bbox_to_anchor=(1, 1))
+        axes[0].grid(True)
+
+        # --- Line Plot ---
+        sns.lineplot(data=df, x="Test Size", y="MAE", hue="Method", marker="o", palette="Set1", ax=axes[1])
+        axes[1].set_title(f"{title} - Line Plot", fontsize=14)
+        axes[1].set_xlabel("Test Size", fontsize=12)
+        axes[1].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
+        axes[1].legend(loc="upper left", bbox_to_anchor=(1, 1))
+        axes[1].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+        # Now run your plotting
+        # plot_violin(df_random, "Performance of Methods (Random Split)")
+        # plot_violin(df_block, "Performance of Methods (Block Split)")
+
+
+    plot_results(df_random, "Cross-layer projection - Performance of Methods (Random Split)")
+    plot_results(df_block, "Cross-layer projection - Performance of Methods (Block Split)")
+
+    return df_random, df_block
+
+
 
 
 if __name__ == '__main__':
     # evaluation_instance(file_name="CONF/cleaned_rows.csv")
     # evaluation_sequence(file_name="CONF/cleaned_spiral.csv", runs=20)
-    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=5))
+    
+    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=2))
+
+    df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2)
+    # print(df_comparison)
