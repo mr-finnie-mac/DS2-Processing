@@ -113,7 +113,7 @@ def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clus
     print(f"Random Split -> Train: {len(train_random)}, Test: {len(test_random)}")
     print(f"Block Split  -> Train: {len(train_block)}, Test: {len(test_block)}")
 
-    # visualize_splits(train_random, test_random, train_block, test_block) # if want to see the distibution of test and train points
+    visualize_splits(train_random, test_random, train_block, test_block, True) # if want to see the distibution of test and train points
 
 
     return train_random, test_random, train_block, test_block, scaler

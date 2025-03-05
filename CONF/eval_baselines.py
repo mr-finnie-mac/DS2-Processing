@@ -702,7 +702,8 @@ def evaluate_cross_dataset(train_file, test_file, runs=5):
     methods = ["IDW", "Kriging", "Ensemble", "UNET CNN", "Splatformer"]
     error_data_random = []
     error_data_block = []
-    test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
+    # test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
+    test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
 
     for test_size in test_sizes:
         print(f"Processing test size: {test_size}")
@@ -869,3 +870,4 @@ if __name__ == '__main__':
 
     df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2)
     # print(df_comparison)
+
