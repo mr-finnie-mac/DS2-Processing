@@ -174,7 +174,7 @@ def evaluate_unet(model, test_df):
     return mae, rmse
 
 
-def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0):
+def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, epochs=20):
     """
     Executes the Gaussian Splatting + Transformer method on the dataset.
     """
@@ -196,7 +196,7 @@ def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_trai
     if missing_test_cols:
         raise KeyError(f"Missing columns in testing data: {missing_test_cols}")
 
-    # 🛠 Filter only the required columns
+    # Filter only the required columns
     this_train_random = this_train_random[cols_needed]
     this_test_random = this_test_random[cols_needed]
     this_train_block = this_train_block[cols_needed]
@@ -212,7 +212,7 @@ def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_trai
     test_random_features = generate_gaussian_features(test_random_gaussians)
 
     # Train the Gaussian Transformer model for random data
-    splatformer_random_model = train_gaussian_transformer(features=train_random_features, train_data=this_train_random, test_data=this_test_random)
+    splatformer_random_model = train_gaussian_transformer(features=train_random_features, train_data=this_train_random,epochs=epochs, test_data=this_test_random)
     
     # Set the model to evaluation mode before evaluation
     splatformer_random_model.eval()  
@@ -685,7 +685,7 @@ def visualize_cross_dataset_predictions(train_df, test_df, predictions_dict):
     plt.show()
 
 
-def evaluate_cross_dataset(train_file, test_file, runs=5):
+def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
     """
     Evaluate model performance when training on one dataset (lower height)
     and testing on another dataset (higher height).
@@ -702,14 +702,14 @@ def evaluate_cross_dataset(train_file, test_file, runs=5):
     methods = ["IDW", "Kriging", "Ensemble", "UNET CNN", "Splatformer"]
     error_data_random = []
     error_data_block = []
-    # test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
-    test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+    test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
+    # test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
 
     for test_size in test_sizes:
         print(f"Processing test size: {test_size}")
 
-        for _ in range(runs):
-            print(f"Running Cross-Dataset Evaluation (Train: {train_file}, Test: {test_file})")
+        for run in range(runs):
+            print(f"Run {str(run)}, Test {test_size} - Running Cross-Dataset Evaluation (Train: {train_file}, Test: {test_file})")
 
             # Load datasets
             train_df = pd.read_csv(train_file)
@@ -747,13 +747,13 @@ def evaluate_cross_dataset(train_file, test_file, runs=5):
             ens_rand_mae, _, ens_block_mae, _ = do_Ensemble(test_size, train_df, random_layer_test, train_df, block_layer_test)
             
             # U-Net CNNN
-            unet_model = train_unet(train_df)  # Train on random split
+            unet_model = train_unet(train_df, epochs=epochs)  # Train on random split
             unet_rand_mae, _ = evaluate_unet(unet_model, random_layer_test)  # Evaluate on random test set
             unet_block_mae, _ = evaluate_unet(unet_model, block_layer_test)  # Evaluate on block test set
 
             # Splatformer
             splatformer_rand_mae, splatformer_block_mae = do_splatformer(
-                test_size, train_df, random_layer_test, train_df, block_layer_test
+                test_size, train_df, random_layer_test, train_df, block_layer_test, epochs=epochs
             )
 
             error_data_random.append(["RF", test_size, rf_rand_mae])
@@ -859,15 +859,13 @@ def evaluate_cross_dataset(train_file, test_file, runs=5):
 
     return df_random, df_block
 
-
-
-
 if __name__ == '__main__':
     # evaluation_instance(file_name="CONF/cleaned_rows.csv")
     # evaluation_sequence(file_name="CONF/cleaned_spiral.csv", runs=20)
     
-    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=2))
+    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=2))
 
-    df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2)
+    df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2, epochs=20) # train on 20m rows, predict 15m spiral
+    df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=2, epochs=20) # train on 15m spiral, predict 20m rows
     # print(df_comparison)
 

@@ -5,7 +5,7 @@ from scipy.spatial import KDTree
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
-
+from datetime import datetime
 # # Load dataset (modify path as needed)
 # df = pd.read_csv("CONF/cleaned_spiral.csv")
 
@@ -49,7 +49,7 @@ def spatial_block_split(df, n_clusters=10, test_fraction=0.2, positions = 0):
 
 
 
-def visualize_splits(train_random, test_random, train_block, test_block):
+def visualize_splits(train_random, test_random, train_block, test_block, saveFig = False, test_size=0.2):
     plt.figure(figsize=(12, 5))
 
     # Count unique points based on lat and lon
@@ -77,7 +77,14 @@ def visualize_splits(train_random, test_random, train_block, test_block):
     plt.legend()
 
     plt.tight_layout()
-    plt.show()
+    
+    if saveFig:
+        now = datetime.now() # current date and time
+        date_time = now.strftime("%d-%m-%Y_%H-%M-%S")
+        plt.savefig("CONF/figures/test-train windows/test-train-window_"+str(test_size)+"_"+date_time+".png")
+    else:
+        plt.show()
+    
 
 def normalize_dataset(df):
     """Normalize key features in the dataset using StandardScaler"""
@@ -113,7 +120,7 @@ def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clus
     print(f"Random Split -> Train: {len(train_random)}, Test: {len(test_random)}")
     print(f"Block Split  -> Train: {len(train_block)}, Test: {len(test_block)}")
 
-    visualize_splits(train_random, test_random, train_block, test_block, True) # if want to see the distibution of test and train points
+    # visualize_splits(train_random, test_random, train_block, test_block, True, this_test_size) # if want to see the distibution of test and train points
 
 
     return train_random, test_random, train_block, test_block, scaler
