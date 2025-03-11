@@ -2,22 +2,30 @@ import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
 from scipy.spatial.distance import pdist, squareform
+import config
 
+import numpy as np
+import pandas as pd
+from scipy.spatial.distance import pdist, squareform
 
-def compute_anisotropic_covariance(points, k=5):
-    """
-    Compute anisotropic covariance matrices for each point based on k-nearest neighbors.
-    """
+def compute_anisotropic_covariance(data, fixed_dim=10):
+    """Computes anisotropic covariance and ensures fixed dimensionality."""
+    
+    points = data[["gps.lat", "gps.lon", "altitudeAMSL"]].values
     distances = squareform(pdist(points))  # Pairwise distances
-    covariances = []
     
-    for i in range(len(points)):
-        neighbors = np.argsort(distances[i])[1:k+1]  # Get k nearest neighbors
-        local_points = points[neighbors]
-        cov_matrix = np.cov(local_points, rowvar=False)  # Covariance matrix
-        covariances.append(cov_matrix)
+    # Compute covariance (example: using exponential decay)
+    covariances = np.exp(-distances / np.max(distances))  
+
+    # Ensure all covariance matrices are same size (fixed_dim)
+    covariance_vectors = []
+    for row in covariances:
+        if len(row) > fixed_dim:
+            covariance_vectors.append(row[:fixed_dim])  # Truncate if too long
+        else:
+            covariance_vectors.append(np.pad(row, (0, fixed_dim - len(row)), mode='constant'))  # Pad if too short
     
-    return np.array(covariances)
+    return np.array(covariance_vectors)
 
 
 def adaptively_cluster_points(df, eps=0.001, min_samples=5):
@@ -29,59 +37,35 @@ def adaptively_cluster_points(df, eps=0.001, min_samples=5):
     df['cluster'] = clustering.labels_  # Assign cluster labels
     return df
 
-def create_gaussian_representation_old(df):
+def create_gaussian_representation(data):
     """
-    Generate Gaussian splats based on lat, lon, altitude, and signal strength.
-
+    Creates Gaussian representation of input data with a single column storing covariance.
+    
     Args:
-        df (pd.DataFrame): Input DataFrame with lat/lon/localXYZ and signal strength.
-
+        data: DataFrame with spatial and signal strength information.
+    
     Returns:
-        pd.DataFrame: Processed Gaussian representation.
+        DataFrame with Gaussian features and a single covariance column.
     """
-    
-    # Ensure input is a DataFrame
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("Expected input to be a DataFrame, got {}".format(type(df)))
 
-    # Required columns
-    required_columns = {"gps.lat", "gps.lon", "altitudeAMSL", "localPosition.x", "localPosition.y", "localPosition.z",
-                        "rsrp", "rsrq", "rssi", "sinr"}
+    # Compute the covariance matrices
+    covariance_matrices = compute_anisotropic_covariance(data)
 
-    # missing_columns = required_columns - set(df.columns)
-    # if missing_columns:
-    #     raise KeyError(f"Missing columns in DataFrame: {missing_columns}")
+    # Convert each covariance matrix into a numpy array
+    covariance_matrices = [np.array(cov) for cov in covariance_matrices]
 
-    print(" All required columns are present.")
+    # Convert to DataFrame with a single column
+    gaussians_df = data.copy()
+    gaussians_df["covariance"] = covariance_matrices  # Store full covariance matrix per row
 
-    # Compute Gaussian properties
-    covariance = compute_anisotropic_covariance(df[['gps.lat', 'gps.lon', 'altitudeAMSL']].values)
-    df = df.copy()  # Make a copy of the DataFrame
-    df["covariance"] = list(covariance)
+    print(f"Final Gaussian Representation Columns: {gaussians_df.columns}")
+    print("Gaussian Representation Sample:")
+    print(gaussians_df.head())
 
-    # Return complete DataFrame
-    return df.copy()
+    return gaussians_df
 
-import numpy as np
 
-def create_gaussian_representation(df):
-    """Generate Gaussian features while ensuring correct dimensionality."""
-    
-    # Extract spatial + signal strength features
-    lat_lon_alt = df[["gps.lat", "gps.lon", "altitudeAMSL"]].values  # Shape (N, 3)
-    local_xyz = df[["localPosition.x", "localPosition.y", "localPosition.z"]].values  # Shape (N, 3)
-    signal_features = df[["rsrp", "rssi", "sinr", "rsrq"]].values  # Shape (N, 4)
-    
-    # Compute Anisotropic Covariance
-    covariance_matrices = compute_anisotropic_covariance(lat_lon_alt)  # Likely shape (N, 3, 3)
 
-    # **Fix: Flatten covariance matrices if they have extra dimensions**
-    covariance_matrices = covariance_matrices.reshape(len(df), -1)  # Flatten (N, 3, 3) -> (N, 9)
-
-    # Stack all features into a Gaussian feature representation
-    gaussian_features = np.hstack([lat_lon_alt, local_xyz, signal_features, covariance_matrices])
-
-    return gaussian_features  # Returns shape (N, 16) if correct
 
 
 

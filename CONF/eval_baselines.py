@@ -1,3 +1,4 @@
+from config import *
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from IDW import perform_IDW
 from krig import perform_Krig
@@ -13,6 +14,11 @@ from keras.callbacks import EarlyStopping
 import sys
 from transformer import train_gaussian_transformer, evaluate_gaussian_transformer, generate_gaussian_features
 from gaussian import compute_anisotropic_covariance, adaptively_cluster_points, create_gaussian_representation
+from feature_engineering import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi, plot_flightpath_with_arrows, plot_flightpath_with_distances, plot_sinr_weighted_rssi
+from sklearn.preprocessing import StandardScaler
+
+# 52.60818, 1.542818, altitudeAMSL: 15.2
+
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -178,65 +184,67 @@ def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_trai
     """
     Executes the Gaussian Splatting + Transformer method on the dataset.
     """
-    
-    print("Available columns in train_random before filtering:", this_train_random.columns)
 
-    # 🛠 Define all necessary columns
-    cols_needed = ["gps.lat", "gps.lon", "altitudeAMSL", "localPosition.x", "localPosition.y", "localPosition.z",
-                   "rsrp", "rsrq", "rssi", "sinr"]
+    print("Processing Splatformer Method for Test Size:", test_size)
+    
+    # Required feature columns
+    cols_needed = [
+        "gps.lat", "gps.lon", "altitudeAMSL", 
+        "localPosition.x", "localPosition.y", "localPosition.z",
+        "rsrp", "rsrq", "rssi", "sinr"
+    ]
+
+    # Ensure we filter out only relevant columns
     this_train_random = this_train_random[cols_needed].copy()
     this_test_random = this_test_random[cols_needed].copy()
-    
-    # Check for missing columns in training and testing data
-    missing_train_cols = set(cols_needed) - set(this_train_random.columns)
-    missing_test_cols = set(cols_needed) - set(this_test_random.columns)
-    
-    if missing_train_cols:
-        raise KeyError(f"Missing columns in training data: {missing_train_cols}")
-    if missing_test_cols:
-        raise KeyError(f"Missing columns in testing data: {missing_test_cols}")
+    this_train_block = this_train_block[cols_needed].copy()
+    this_test_block = this_test_block[cols_needed].copy()
 
-    # Filter only the required columns
-    this_train_random = this_train_random[cols_needed]
-    this_test_random = this_test_random[cols_needed]
-    this_train_block = this_train_block[cols_needed]
-    this_test_block = this_test_block[cols_needed]
-
-    print("Filtered train_random columns:", this_train_random.columns)
-
-    # Continue with the normal pipeline
+    # Generate Gaussian representations
+    print("Generating Gaussian Representations...")
     train_random_gaussians = create_gaussian_representation(this_train_random)
     test_random_gaussians = create_gaussian_representation(this_test_random)
+    print(train_random_gaussians.columns)
 
-    train_random_features = generate_gaussian_features(train_random_gaussians)
-    test_random_features = generate_gaussian_features(test_random_gaussians)
+    # Convert Gaussian data into features
+    print("Converting Gaussian Features to DataFrames...")
+    train_random_features = generate_gaussian_features(pd.DataFrame(train_random_gaussians), tower_location=tower_position)
+    test_random_features = generate_gaussian_features(pd.DataFrame(test_random_gaussians), tower_location=tower_position)
+    # Debug: Print the shape and columns of Gaussian features
+    print(f"Shape of train_random_features: {train_random_features.shape}")
+    print(f"Columns in Gaussian Features DataFrame: {train_random_gaussians.columns}") 
 
-    # Train the Gaussian Transformer model for random data
-    splatformer_random_model = train_gaussian_transformer(features=train_random_features, train_data=this_train_random,epochs=epochs, test_data=this_test_random)
-    
-    # Set the model to evaluation mode before evaluation
-    splatformer_random_model.eval()  
+    # plot_flightpath_with_distances(train_random_features, tower_location=tower_position)
+    # plot_flightpath_with_arrows(train_random_features, tower_location=tower_position)
+    # plot_sinr_weighted_rssi(train_random_features)
+
+    # Train the transformer model
+    print("Training Transformer on Random Split...")
+    splatformer_random_model = train_gaussian_transformer(train_random_features, this_train_random, epochs=epochs)
 
     # Evaluate the model
     splatformer_rand_mae = evaluate_gaussian_transformer(splatformer_random_model, this_test_random, test_random_features)
 
-    # Process block data
+    # Repeat process for block data
     train_block_gaussians = create_gaussian_representation(this_train_block)
     test_block_gaussians = create_gaussian_representation(this_test_block)
 
-    train_block_features = generate_gaussian_features(train_block_gaussians)
-    test_block_features = generate_gaussian_features(test_block_gaussians)
+    train_block_features = generate_gaussian_features(pd.DataFrame(train_block_gaussians), tower_location=tower_position)
+    test_block_features = generate_gaussian_features(pd.DataFrame(test_block_gaussians), tower_location=tower_position)
 
-    # Train the Gaussian Transformer model for block data
-    splatformer_block_model = train_gaussian_transformer(features=train_block_features, train_data=this_train_block, test_data=this_test_block)
-    
-    # Set the block model to evaluation mode before evaluation
-    splatformer_block_model.eval()  
+    # plot_flightpath_with_distances(train_block_features, tower_location=tower_position)
+    # plot_flightpath_with_arrows(train_block_features, tower_location=tower_position)
+    # plot_sinr_weighted_rssi(train_block_features)
 
-    # Evaluate the model
+    print("Training Transformer on Block Split...")
+    splatformer_block_model = train_gaussian_transformer(train_block_features, this_train_block, epochs=epochs)
+
     splatformer_block_mae = evaluate_gaussian_transformer(splatformer_block_model, this_test_block, test_block_features)
 
     return splatformer_rand_mae, splatformer_block_mae
+
+
+
 
 
 
@@ -687,56 +695,59 @@ def visualize_cross_dataset_predictions(train_df, test_df, predictions_dict):
 
 def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
     """
-    Evaluate model performance when training on one dataset (lower height)
-    and testing on another dataset (higher height).
+    Evaluates model performance by training on one dataset and testing on another dataset.
 
     Args:
-        train_file (str): CSV file path for training dataset.
-        test_file (str): CSV file path for testing dataset.
-        runs (int): Number of runs to average performance.
+        train_file (str): CSV path for training dataset.
+        test_file (str): CSV path for testing dataset.
+        runs (int): Number of runs for averaging results.
 
     Returns:
         DataFrame with evaluation results.
     """
-    
+
     methods = ["IDW", "Kriging", "Ensemble", "UNET CNN", "Splatformer"]
-    error_data_random = []
-    error_data_block = []
+    error_data_random, error_data_block = [], []
     test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
-    # test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
 
     for test_size in test_sizes:
-        print(f"Processing test size: {test_size}")
+        print(f"\n🔹 Processing test size: {test_size}")
 
         for run in range(runs):
-            print(f"Run {str(run)}, Test {test_size} - Running Cross-Dataset Evaluation (Train: {train_file}, Test: {test_file})")
+            print(f"Run {run+1}/{runs}: Training on {train_file}, Testing on {test_file}")
 
             # Load datasets
             train_df = pd.read_csv(train_file)
             test_df = pd.read_csv(test_file)
 
-            # Subset test dataset at its unique height
-            # test_height = test_df["localPosition.z"].unique()[0]
-            # test_subset = test_df[test_df["localPosition.z"] == test_height]
+            tower_location = tower_position
 
-            # Here we split up the test file only, we can use the same fucntion but only use the test split.
-            _, test_random, _ , test_block, scaler = perform_splits(
-                filename=test_file,  # Pass DataFrame directly
+            # compute the engineered features
+            # train_df['distance_to_tower'] = compute_distance_to_tower(train_df, tower_location)
+            # test_df['distance_to_tower'] = compute_distance_to_tower(test_df, tower_location)
+            # train_df['tower_direction'] = compute_tower_direction(train_df, tower_location)
+            # test_df['tower_direction'] = compute_tower_direction(test_df, tower_location)
+            # train_df['sinr_weighted_rssi'] = compute_sinr_weighted_rssi(train_df)
+            # test_df['sinr_weighted_rssi'] = compute_sinr_weighted_rssi(test_df)
+
+            
+
+
+            # Split only the test dataset
+            _, test_random, _, test_block, _ = perform_splits(
+                filename=test_file,  
                 this_test_size=test_size, 
                 this_n_clusters=10, 
                 this_test_fraction=test_size
             )
 
-            random_layer_test = test_random
-            block_layer_test = test_block
-
             # IDW
-            rand_mae, _, block_mae, _ = do_IDW(test_size, train_df, random_layer_test, train_df, block_layer_test)
+            rand_mae, _, block_mae, _ = do_IDW(test_size, train_df, test_random, train_df, test_block)
             error_data_random.append(["IDW", test_size, rand_mae])
             error_data_block.append(["IDW", test_size, block_mae])
 
             # Kriging
-            rand_mae, _, block_mae, _ = do_Krig(test_size, train_df, random_layer_test, train_df, block_layer_test)
+            rand_mae, _, block_mae, _ = do_Krig(test_size, train_df, test_random, train_df, test_block)
             error_data_random.append(["Kriging", test_size, rand_mae])
             error_data_block.append(["Kriging", test_size, block_mae])
 
@@ -744,63 +755,37 @@ def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
             rf_rand_mae, _, rf_block_mae, _, \
             xg_rand_mae, _, xg_block_mae, _, \
             lg_rand_mae, _, lg_block_mae, _, \
-            ens_rand_mae, _, ens_block_mae, _ = do_Ensemble(test_size, train_df, random_layer_test, train_df, block_layer_test)
-            
-            # U-Net CNNN
-            unet_model = train_unet(train_df, epochs=epochs)  # Train on random split
-            unet_rand_mae, _ = evaluate_unet(unet_model, random_layer_test)  # Evaluate on random test set
-            unet_block_mae, _ = evaluate_unet(unet_model, block_layer_test)  # Evaluate on block test set
+            ens_rand_mae, _, ens_block_mae, _ = do_Ensemble(test_size, train_df, test_random, train_df, test_block)
 
-            # Splatformer
+            # U-Net CNN
+            unet_model = train_unet(train_df, epochs=epochs)  
+            unet_rand_mae, _ = evaluate_unet(unet_model, test_random)  
+            unet_block_mae, _ = evaluate_unet(unet_model, test_block)  
+
+            # 🛠 Splatformer (Transformer + Gaussian Splatting)
             splatformer_rand_mae, splatformer_block_mae = do_splatformer(
-                test_size, train_df, random_layer_test, train_df, block_layer_test, epochs=epochs
+                test_size, train_df, test_random, train_df, test_block, epochs=epochs
             )
 
-            error_data_random.append(["RF", test_size, rf_rand_mae])
-            error_data_block.append(["RF", test_size, rf_block_mae])
-
-            error_data_random.append(["XGBoost", test_size, xg_rand_mae])
-            error_data_block.append(["XGBoost", test_size, xg_block_mae])
-
-            error_data_random.append(["LightGBM", test_size, lg_rand_mae])
-            error_data_block.append(["LightGBM", test_size, lg_block_mae])
-
-            error_data_random.append(["Ensemble", test_size, ens_rand_mae])
-            error_data_block.append(["Ensemble", test_size, ens_block_mae])
-
-            
-            error_data_random.append(["U-Net", test_size, unet_rand_mae])
-            error_data_block.append(["U-Net", test_size, unet_block_mae])
-
-            error_data_random.append(["Splatformer", test_size, splatformer_rand_mae])
-            error_data_block.append(["Splatformer", test_size, splatformer_block_mae])
+            # Store results
+            error_data_random.extend([
+                ["RF", test_size, rf_rand_mae], ["XGBoost", test_size, xg_rand_mae],
+                ["LightGBM", test_size, lg_rand_mae], ["Ensemble", test_size, ens_rand_mae],
+                ["U-Net", test_size, unet_rand_mae], ["Splatformer", test_size, splatformer_rand_mae]
+            ])
+            error_data_block.extend([
+                ["RF", test_size, rf_block_mae], ["XGBoost", test_size, xg_block_mae],
+                ["LightGBM", test_size, lg_block_mae], ["Ensemble", test_size, ens_block_mae],
+                ["U-Net", test_size, unet_block_mae], ["Splatformer", test_size, splatformer_block_mae]
+            ])
 
     # Convert results to DataFrame
-    # df_results = pd.DataFrame(error_data, columns=["Method", "Test Height", "MAE"])
-    
-    # Save to CSV
-    # df_results.to_csv("cross_dataset_results.csv", index=False)
-    # Convert to DataFrame for easier plotting
     df_random = pd.DataFrame(error_data_random, columns=["Method", "Test Size", "MAE"])
     df_block = pd.DataFrame(error_data_block, columns=["Method", "Test Size", "MAE"])
 
-    print("Random DataFrame:")
-    print(df_random)
-    print(df_random.dtypes)
-
-    print("Block DataFrame:")
-    print(df_block)
-    print(df_block.dtypes)
-
-    df_random['Method'] = df_random['Method'].astype('category')
-    df_random['Test Size'] = df_random['Test Size'].astype('category')
-
-    df_block['Method'] = df_block['Method'].astype('category')
-    df_block['Test Size'] = df_block['Test Size'].astype('category')
-
-
-    df_random.to_csv('layer_df_randomout.csv', index=False) 
-    df_block.to_csv('layer_df_blockout.csv', index=False) 
+    # Save results
+    df_random.to_csv('cross_dataset_random_results.csv', index=False) 
+    df_block.to_csv('cross_dataset_block_results.csv', index=False) 
 
     def plot_violin(df, title):
         # Ensure that columns are treated as categorical
@@ -856,16 +841,22 @@ def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
 
     plot_results(df_random, "Cross-layer projection - Performance of Methods (Random Split)")
     plot_results(df_block, "Cross-layer projection - Performance of Methods (Block Split)")
-
+                 
     return df_random, df_block
+
+
 
 if __name__ == '__main__':
     # evaluation_instance(file_name="CONF/cleaned_rows.csv")
     # evaluation_sequence(file_name="CONF/cleaned_spiral.csv", runs=20)
     
-    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=2))
+    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=5))
 
-    df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2, epochs=20) # train on 20m rows, predict 15m spiral
-    df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=2, epochs=20) # train on 15m spiral, predict 20m rows
+    # train_block_features  = pd.read_csv("CONF/cleaned_rows.csv")
+    # plot_flightpath_with_distances(train_block_features, tower_location=tower_position)
+    # plot_flightpath_with_arrows(train_block_features, tower_location=tower_position)
+    # plot_sinr_weighted_rssi(train_block_features)
+
+    # df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2, epochs=20) # train on 20m rows, predict 15m spiral
+    df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=2, epochs=5)#train on 15m spiral, predict 20m rows
     # print(df_comparison)
-

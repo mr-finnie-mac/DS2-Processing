@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial import cKDTree
 from spatial_test_train_split import perform_splits
+import config
 
 def idw_interpolation(train_df, test_df, position_cols, signal_col, power=2, k=5):
     """

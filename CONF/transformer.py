@@ -5,20 +5,26 @@ import torch.optim as optim
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
+import config
+from feature_engineering import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi
 
 class GaussianTransformer(nn.Module):
     def __init__(self, input_dim, embed_dim=64, num_heads=4, num_layers=2):
         super(GaussianTransformer, self).__init__()
-        self.embedding = nn.Linear(input_dim, embed_dim)
+        
+        # Ensure input_dim matches what is in train_random_features
+        print(f"Expected input_dim: {input_dim}")  # Debugging print
+        
+        self.embedding = nn.Linear(input_dim, embed_dim)  # Correct input dim
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
         self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)
         self.decoder = nn.Linear(embed_dim, 1)  # Predict signal strength
 
     def forward(self, x):
-        x = self.embedding(x)
-        x = self.transformer(x)
+        x = self.embedding(x)  # Ensure embedding works with input size
         return self.decoder(x)
-    
+
 
 def generate_gaussian_features_old(data):
     """
@@ -36,6 +42,7 @@ def generate_gaussian_features_old(data):
     print("FOR generate_gaussian_features _>>>>>>>Available columns in data:", data.columns)
     
     required_columns = ['gps.lat', 'gps.lon', 'altitudeAMSL', 'localPosition.x', 'localPosition.y', 'localPosition.z', 'rsrp', 'rsrq', 'rssi', 'sinr', 'covariance']
+    print(data.columns)
     missing_columns = [col for col in required_columns if col not in data.columns]
     if missing_columns:
         raise KeyError(f"Missing columns: {missing_columns}")
@@ -50,53 +57,86 @@ def generate_gaussian_features_old(data):
     
     return features
 
-from sklearn.preprocessing import StandardScaler
+def generate_gaussian_features(data, tower_location=(52.60818, 1.542818, 15.2)):
+    """
+    Extracts Gaussian features, ensuring covariance is handled correctly,
+    and incorporates engineered features.
 
-def generate_gaussian_features(data):
-    """Ensure input data is a DataFrame before feature scaling."""
+    Args:
+        data (pd.DataFrame): Gaussian-processed data.
+        tower_location (tuple): (lat, lon, altitudeAMSL) of the nearest cell tower.
 
-    # Convert to DataFrame if necessary
-    if not isinstance(data, pd.DataFrame):
-        data = pd.DataFrame(data)  # Convert list/array to DataFrame
+    Returns:
+        np.array: Feature array for transformer training.
+    """
 
-    feature_cols = data.columns  # Get column names dynamically
+    # --- Standard feature columns ---
+    feature_columns = ['gps.lat', 'gps.lon', 'altitudeAMSL', 
+                       'localPosition.x', 'localPosition.y', 'localPosition.z', 
+                       'rsrp', 'rsrq', 'rssi', 'sinr']
+    
+    spatial_signal_features = data[feature_columns].values
 
-    # Normalize transformer input
+    # --- Compute new engineered features ---
+    dist_to_tower = compute_distance_to_tower(data, tower_location).values.reshape(-1, 1)
+    azimuth, elevation = compute_tower_direction(data, tower_location)
+    sinr_weighted_rssi = compute_sinr_weighted_rssi(data).values.reshape(-1, 1)
+
+    azimuth = azimuth.values.reshape(-1, 1)  # Ensure proper shape
+    elevation = elevation.values.reshape(-1, 1)
+
+    # --- Ensure covariance is extracted correctly ---
+    if "covariance" in data.columns:
+        covariance_features = np.array([cov.flatten() for cov in data["covariance"].values])
+    else:
+        print("WARNING: Covariance missing, using only standard features.")
+        covariance_features = np.zeros((data.shape[0], 10))  # Placeholder if covariance is missing
+
     scaler = StandardScaler()
-    data[feature_cols] = scaler.fit_transform(data[feature_cols])  
+    covariance_features = scaler.fit_transform(covariance_features)
 
-    return data.values  # Return NumPy array for transformer model
+    # --- Combine all features ---
+    features = np.hstack([
+        spatial_signal_features,  # Standard features
+        sinr_weighted_rssi,       # New feature
+        dist_to_tower,            # New feature
+        azimuth, elevation,       # New directional features
+        covariance_features       # Covariance matrix
+    ])
+    scaler = StandardScaler()
+    features = scaler.fit_transform(features)
+
+
+    # Debugging output to verify structure
+    print(f"Final Shape of Gaussian Features: {features.shape}")
+    print(f"Sample Feature Row:\n {features[0]}")
+    print("Feature means:", np.mean(features, axis=0))
+    print("Feature stds:", np.std(features, axis=0))
+    print("Min values:", np.min(features, axis=0))
+    print("Max values:", np.max(features, axis=0))
+    print("Any NaNs?", np.isnan(features).any())
 
 
 
-def train_gaussian_transformer(features, train_data, test_data, epochs=20, lr=0.001):
-    # Ensure input is a DataFrame
-    if isinstance(train_data, np.ndarray):
-        train_data = pd.DataFrame(train_data)
+    return features
 
-    if not isinstance(train_data, pd.DataFrame):
-        raise TypeError("Expected a DataFrame but got NumPy array. Check data flow.")
 
-    print("Type of train data:", type(train_data))  # Debugging check
 
-    # Generate Gaussian features
-    # gaussians = generate_gaussian_features(train_data)
-    gaussians = features
 
-    # Verify shape of generated features
-    print("Shape of generated Gaussian features:", [g.shape for g in gaussians], len(gaussians))
-    print("Compsition of a gaussain feature: ", gaussians[10])
 
-    # Create input tensor for training
-    X_train = torch.tensor([np.hstack([g[0], g[2]]) for g in gaussians], dtype=torch.float32)
 
-    # Ensure the correct shape for y_train
+
+
+def train_gaussian_transformer(features, train_data, epochs=20, lr=0.001):
+    X_train = torch.tensor(features, dtype=torch.float32)
+
     y_train = torch.tensor(train_data["rssi"].values, dtype=torch.float32).unsqueeze(1)
 
-    # Print shapes for debugging
-    print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+    print(f"Final shape of training features: {X_train.shape}")  # Debugging print
 
-    model = GaussianTransformer(input_dim=X_train.shape[1])
+    # Fix the transformer input dimension
+    model = GaussianTransformer(input_dim=X_train.shape[1])  
+
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
@@ -116,37 +156,35 @@ def train_gaussian_transformer(features, train_data, test_data, epochs=20, lr=0.
 
 
 
+def evaluate_gaussian_transformer(model, test_data, test_features):
+    """
+    Evaluates the Gaussian Transformer model.
 
+    Args:
+        model (nn.Module): Trained Transformer model.
+        test_data (pd.DataFrame): Test dataset.
+        test_features (np.array): Gaussian-transformed test features.
 
-
-def evaluate_gaussian_transformer(model, test_data, gaussians_test):
-    # Generate test features from the Gaussian features
-    # X_test = generate_gaussian_features(test_data)  # Uncomment if needed
-    
-    # Create input tensor from Gaussian features
-    X_test = torch.tensor([np.hstack([g[0], g[2]]) for g in gaussians_test], dtype=torch.float32)
-    
-    # Extracting the true labels for RSSI
+    Returns:
+        float: Mean Absolute Error (MAE).
+    """
+    X_test = torch.tensor(test_features, dtype=torch.float32)
     y_test = torch.tensor(test_data["rssi"].values, dtype=torch.float32).unsqueeze(1)
     
-    # Check shapes of X_test and y_test
-    print(f"Shape of X_test: {X_test.shape}, Shape of y_test: {y_test.shape}")
-    
-    # Ensure that the number of samples matches
+    # Ensure correct shape
     if X_test.shape[0] != y_test.shape[0]:
-        raise ValueError(f"Mismatch in number of samples: X_test has {X_test.shape[0]} samples, "
-                         f"but y_test has {y_test.shape[0]} samples.")
-    
-    # Evaluate the model
+        raise ValueError(f"Mismatch: X_test has {X_test.shape[0]} samples, but y_test has {y_test.shape[0]} samples.")
+
+    # Model evaluation
     with torch.no_grad():
         y_pred = model(X_test)
 
-    # Calculate MAE and RMSE
+    # Compute metrics
     mae = torch.mean(torch.abs(y_pred - y_test)).item()
     rmse = torch.sqrt(torch.mean((y_pred - y_test) ** 2)).item()
-    
-    # Return both metrics
-    # return  mae, "RMSE": rmse}
+
     return mae
+    # return mae, rmse
+
 
 

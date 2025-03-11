@@ -4,7 +4,7 @@
 *Drone-based spatial 5G signal dataset and prediction algorithms consisting of telemetry and cellualr properties. Applied statistical, interpolative and learning methods*
 Allows for solar modeling of stations using volume focused design.
 
-See perfomance example below.
+See perfomance example below. Run CONF/eval_baselines.py for latest results.
 ![alt text](<CONF/figures/present/block splatformer Performance.png>)
 *We have Kriging, IDW, Ensemble method and parts (RF, XGBoost, LightGBM), UNET CNN and Our proposed method, a Gaussain Splatting based Transformer*
 

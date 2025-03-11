@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.metrics import mean_absolute_error
 from eval_baselines import *
+import config
+
 def calculate_distance_from_origin(df):
     """
     Calculate the Euclidean distance from the origin (0, 0).

@@ -1,6 +1,7 @@
 from pykrige.ok import OrdinaryKriging
 from spatial_test_train_split import perform_splits
 import numpy as np
+import config
 
 def kriging_interpolation(train_df, test_df, position_cols, signal_col):
     """

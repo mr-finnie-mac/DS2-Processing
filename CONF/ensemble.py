@@ -5,6 +5,9 @@ import xgboost as xgb
 import lightgbm as lgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from spatial_test_train_split import perform_splits
+import config
+from sklearn.preprocessing import StandardScaler
+
 
 
 # # Load and split dataset using spatial methods
@@ -57,6 +60,8 @@ def train_and_evaluate(train_df, test_df, target_col="rssi", position_cols=0):
 
     # Evaluate performance
     def evaluate(y_true, y_pred):
+        
+
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         return {"MAE": mae, "RMSE": rmse}
