@@ -57,7 +57,6 @@ def compute_sinr_weighted_rssi(data):
     return weighted_rssi
 
 
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
