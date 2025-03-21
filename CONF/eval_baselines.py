@@ -14,11 +14,23 @@ from keras.callbacks import EarlyStopping
 import sys
 from transformer import train_gaussian_transformer, evaluate_gaussian_transformer, generate_gaussian_features
 from gaussian import compute_anisotropic_covariance, adaptively_cluster_points, create_gaussian_representation
-from feature_engineering import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi, plot_flightpath_with_arrows, plot_flightpath_with_distances, plot_sinr_weighted_rssi
+from feature_engineering import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi, plot_flightpath_with_arrows, plot_flightpath_with_distances, plot_sinr_weighted_rssi, plot_flightpath_with_diamonds, plot_flightpath_combined
 from sklearn.preprocessing import StandardScaler
-
+from datetime import datetime
 # 52.60818, 1.542818, altitudeAMSL: 15.2
+title_s = 18
+label_s = 16
+line_w = 6
 
+# plt.rcParams.update({
+#     "font.family": "serif",
+#     "font.serif": ["Times New Roman"],
+#     "axes.labelsize": 14,
+#     "axes.titlesize": 16,
+#     "legend.fontsize": 12,
+#     "xtick.labelsize": 16,
+#     "ytick.labelsize": 16
+# })
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -469,7 +481,7 @@ def evaluation_sequence(file_name="", runs=20):
 
 
 
-def evaluation_seq_2(file_name="", runs=20):
+def evaluation_seq_2(file_name="", runs=20, epochs=20):
     # test_sizes = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
     test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
     methods = ["IDW", "Kriging", "Ensemble", "U-Net", "[OURS] Splatformer"] 
@@ -479,9 +491,10 @@ def evaluation_seq_2(file_name="", runs=20):
     # Data storage for visualization
     error_data_random = []
     error_data_block = []
+    tested_sizes = []
 
     for test_size in test_sizes:
-        print(f"Processing test size: {test_size}")
+        print(f"Processed test sizes:{tested_sizes} of {test_sizes}")
 
         for _ in range(runs):
             train_random, test_random, train_block, test_block, scaler = perform_splits(
@@ -520,8 +533,9 @@ def evaluation_seq_2(file_name="", runs=20):
             error_data_block.append(["Ensemble", test_size, ens_block_mae])
 
             # U-Net CNNN
-            unet_model = train_unet(train_random)  # Train on random split
+            unet_model = train_unet(train_random, epochs = epochs) #random spli
             unet_rand_mae, _ = evaluate_unet(unet_model, test_random)  # Evaluate on random test set
+            unet_model = train_unet(train_random, epochs = epochs) #block split
             unet_block_mae, _ = evaluate_unet(unet_model, test_block)  # Evaluate on block test set
 
             error_data_random.append(["U-Net", test_size, unet_rand_mae])
@@ -531,7 +545,7 @@ def evaluation_seq_2(file_name="", runs=20):
             # print(train_random)
             # Gaussian Splatting + Transformer
             splatformer_rand_mae, splatformer_block_mae = do_splatformer(
-                test_size, train_random, test_random, train_block, test_block
+                test_size, train_random, test_random, train_block, test_block, epochs=epochs
             )
 
             error_data_random.append(["[OURS] Splatformer", test_size, splatformer_rand_mae])
@@ -558,6 +572,8 @@ def evaluation_seq_2(file_name="", runs=20):
 
             error_data_random.append(["U-Net", test_size, unet_rand_mae])
             error_data_block.append(["U-Net", test_size, unet_block_mae])
+        
+        tested_sizes.append(test_size)
 
     # Convert to DataFrame for easier plotting
     df_random = pd.DataFrame(error_data_random, columns=["Method", "Test Size", "MAE"])
@@ -594,47 +610,99 @@ def evaluation_seq_2(file_name="", runs=20):
         plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
         plt.grid(True)
         plt.show()
-
+        
     def plot_results(df, title):
         """
-        Plot both a violin plot and a line graph for MAE performance of different methods.
+        Improved visualization with thick lines, bold symbols, and optimized for black & white printing.
 
         Args:
             df: DataFrame containing results (Method, Test Size, MAE)
             title: Title for the plot
         """
 
-        # Ensure categorical data types for better plotting
+        # --- Global Font & Style Settings ---
+        # plt.rcParams.update({
+        #     "font.family": "serif",
+        #     "font.serif": ["Times New Roman"],
+        #     "axes.labelsize": 18,
+        #     "axes.titlesize": 20,
+        #     "legend.fontsize": 18,
+        #     "xtick.labelsize": 16,
+        #     "ytick.labelsize": 16,
+        #     "lines.linewidth": 3,  # Thick lines
+        #     "lines.markersize": 10  # Large markers
+        # })
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.serif": ["Times New Roman"],
+            "axes.labelsize": 16,
+            "axes.titlesize": 20,
+            "legend.fontsize": 15,
+            "xtick.labelsize": 15,
+            "ytick.labelsize": 15,
+            "lines.linewidth": 3,  # Thick lines
+            "lines.markersize": 10  # Large markers
+        })
+
+        # Ensure correct data types
         df['Method'] = df['Method'].astype('category')
-        df['Test Size'] = df['Test Size'].astype(float)  # Convert to float for line plot
+        df['Test Size'] = df['Test Size'].astype(float)
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        fig, axes = plt.subplots(1, 2, figsize=(9, 9))  # **Square Figures**
 
-        # --- Violin Plot ---
-        sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile", ax=axes[0])
-        axes[0].set_title(f"{title} - Violin Plot", fontsize=14)
-        axes[0].set_xlabel("Test Size", fontsize=12)
-        axes[0].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
-        axes[0].legend(loc="upper left", bbox_to_anchor=(1, 1))
-        axes[0].grid(True)
+        # --- Violin Plot (Error distribution) ---
+        sns.violinplot(
+            data=df, x="Test Size", y="MAE", hue="Method",
+            palette="Reds", inner="box", density_norm="width", ax=axes[0]
+        )
+        axes[0].set_title(f"{title}", fontsize=20)
+        axes[0].set_xlabel("Test Size", fontsize=18)
+        axes[0].set_ylabel("Mean Absolute Error (MAE)", fontsize=18)
+        axes[0].grid(True, linestyle="dotted", linewidth=1.5)  # **Thicker Grid**
+        # axes[0].legend(loc="upper right", frameon=True)
 
-        # --- Line Plot ---
-        sns.lineplot(data=df, x="Test Size", y="MAE", hue="Method", marker="o", palette="Set1", ax=axes[1])
-        axes[1].set_title(f"{title} - Line Plot", fontsize=14)
-        axes[1].set_xlabel("Test Size", fontsize=12)
-        axes[1].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
-        axes[1].legend(loc="upper left", bbox_to_anchor=(1, 1))
-        axes[1].grid(True)
+        # --- Line Plot with Symbols and Custom Line Styles ---
+        markers = {
+            "IDW": "o", "Kriging": "s", "Ensemble": "D",
+            "U-Net": "^", "[OURS] Splatformer": "X"
+        }
+        linestyles = {
+            "IDW": "--", "Kriging": "-.", "Ensemble": ":", 
+            "U-Net": (0, (3, 1, 1, 1)), "[OURS] Splatformer": "-"  # Splatformer always solid
+        }
+
+        unique_methods = df["Method"].unique()
+        for method in unique_methods:
+            method_df = df[df["Method"] == method]
+            sns.lineplot(
+                data=method_df, x="Test Size", y="MAE",
+                label=method, marker=markers.get(method, "o"),  
+                linestyle=linestyles.get(method, "--"),  
+                markersize=10, linewidth=3, ax=axes[1]  # Larger markers & Thicker Lines
+            )
+
+        axes[1].set_title(f"{title}", fontsize=20)
+        axes[1].set_xlabel("Test Size", fontsize=18)
+        axes[1].set_ylabel("Mean Absolute Error (MAE)", fontsize=18)
+        axes[1].grid(True, linestyle="dotted", linewidth=1.5)  # Thicker Grid
+        axes[1].legend(loc="upper right", frameon=False)
 
         plt.tight_layout()
+
+        # --- Save figure as PDF ---
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
+        filename = f"performance_{timestamp}.pdf"
+        plt.savefig(filename, format="pdf", bbox_inches="tight", dpi=300)
+        print(f"Figure saved as {filename}")
+
         plt.show()
         # Now run your plotting
         # plot_violin(df_random, "Performance of Methods (Random Split)")
         # plot_violin(df_block, "Performance of Methods (Block Split)")
 
 
-    plot_results(df_random, "Performance of Methods (Random Split)")
-    plot_results(df_block, "Performance of Methods (Block Split)")
+    plot_results(df_random, "Random Perf.)")
+    plot_results(df_block, "Block Perf.")
 
     return df_random, df_block
 
@@ -760,24 +828,30 @@ def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
             # U-Net CNN
             unet_model = train_unet(train_df, epochs=epochs)  
             unet_rand_mae, _ = evaluate_unet(unet_model, test_random)  
-            unet_block_mae, _ = evaluate_unet(unet_model, test_block)  
+            unet_block_mae, _ = evaluate_unet(unet_model, test_block)
 
-            # 🛠 Splatformer (Transformer + Gaussian Splatting)
+            error_data_random.append(["U-Net", test_size, unet_rand_mae])
+            error_data_block.append(["U-Net", test_size, unet_block_mae])
+
+            # Splatformer (Transformer + Gaussian Splatting)
             splatformer_rand_mae, splatformer_block_mae = do_splatformer(
                 test_size, train_df, test_random, train_df, test_block, epochs=epochs
             )
 
             # Store results
             error_data_random.extend([
-                ["RF", test_size, rf_rand_mae], ["XGBoost", test_size, xg_rand_mae],
-                ["LightGBM", test_size, lg_rand_mae], ["Ensemble", test_size, ens_rand_mae],
+                ["Ensemble", test_size, ens_rand_mae],
                 ["U-Net", test_size, unet_rand_mae], ["Splatformer", test_size, splatformer_rand_mae]
             ])
             error_data_block.extend([
-                ["RF", test_size, rf_block_mae], ["XGBoost", test_size, xg_block_mae],
-                ["LightGBM", test_size, lg_block_mae], ["Ensemble", test_size, ens_block_mae],
+                ["Ensemble", test_size, ens_block_mae],
                 ["U-Net", test_size, unet_block_mae], ["Splatformer", test_size, splatformer_block_mae]
             ])
+            # error_data_block.extend([
+            #     ["RF", test_size, rf_block_mae], ["XGBoost", test_size, xg_block_mae],
+            #     ["LightGBM", test_size, lg_block_mae], ["Ensemble", test_size, ens_block_mae],
+            #     ["U-Net", test_size, unet_block_mae], ["Splatformer", test_size, splatformer_block_mae]
+            # ])
 
     # Convert results to DataFrame
     df_random = pd.DataFrame(error_data_random, columns=["Method", "Test Size", "MAE"])
@@ -787,60 +861,142 @@ def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
     df_random.to_csv('cross_dataset_random_results.csv', index=False) 
     df_block.to_csv('cross_dataset_block_results.csv', index=False) 
 
+    
     def plot_violin(df, title):
-        # Ensure that columns are treated as categorical
-        df['Method'] = df['Method'].astype('category')
-        df['Test Size'] = df['Test Size'].astype('category')
-
-        plt.figure(figsize=(12, 6))
-        sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile")
-        plt.title(title, fontsize=14)
-        plt.xlabel("Test Size", fontsize=12)
-        plt.ylabel("Mean Absolute Error (MAE)", fontsize=12)
-        plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
-        plt.grid(True)
-        plt.show()
-
-    def plot_results(df, title):
         """
-        Plot both a violin plot and a line graph for MAE performance of different methods.
+        Improved violin plot with larger text, print-friendly layout, and proper distribution.
 
         Args:
             df: DataFrame containing results (Method, Test Size, MAE)
             title: Title for the plot
         """
 
-        # Ensure categorical data types for better plotting
+        # --- Global Font & Style Settings ---
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.serif": ["Times New Roman"],
+            "axes.labelsize": 18,
+            "axes.titlesize": 20,
+            "legend.fontsize": 18,
+            "xtick.labelsize": 16,
+            "ytick.labelsize": 16,
+            "lines.linewidth": 3,
+            "lines.markersize": 10
+        })
+
+        # Ensure categorical data types
         df['Method'] = df['Method'].astype('category')
-        df['Test Size'] = df['Test Size'].astype(float)  # Convert to float for line plot
+        df['Test Size'] = df['Test Size'].astype(float)
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        fig, ax = plt.subplots(figsize=(9, 9))  # **Square Figure**
+        
+        sns.violinplot(
+            data=df, x="Test Size", y="MAE", hue="Method",
+            palette="Reds", inner="box", density_norm="width", ax=ax
+        )
 
-        # --- Violin Plot ---
-        sns.violinplot(data=df, x="Test Size", y="MAE", hue="Method", split=True, palette="Set2", inner="quartile", ax=axes[0])
-        axes[0].set_title(f"{title} - Violin Plot", fontsize=14)
-        axes[0].set_xlabel("Test Size", fontsize=12)
-        axes[0].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
-        axes[0].legend(loc="upper left", bbox_to_anchor=(1, 1))
-        axes[0].grid(True)
-
-        # --- Line Plot ---
-        sns.lineplot(data=df, x="Test Size", y="MAE", hue="Method", marker="o", palette="Set1", ax=axes[1])
-        axes[1].set_title(f"{title} - Line Plot", fontsize=14)
-        axes[1].set_xlabel("Test Size", fontsize=12)
-        axes[1].set_ylabel("Mean Absolute Error (MAE)", fontsize=12)
-        axes[1].legend(loc="upper left", bbox_to_anchor=(1, 1))
-        axes[1].grid(True)
+        ax.set_title(f"{title} Violin", fontsize=20)
+        ax.set_xlabel("Test Size", fontsize=18)
+        ax.set_ylabel("Mean Absolute Error (MAE)", fontsize=18)
+        ax.grid(True, linestyle="dotted", linewidth=1.5)
+        ax.legend(loc="upper right", frameon=True)
 
         plt.tight_layout()
+
+        # --- Save figure as PDF ---
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
+        filename = f"crosslayer_violin_{timestamp}.pdf"
+        plt.savefig(filename, format="pdf", bbox_inches="tight", dpi=300)
+        print(f"Figure saved as {filename}")
+
+        plt.show()
+
+
+    def plot_results(df, title):
+        """
+        Improved visualization with violin plots and line plots using distinct symbols and line styles.
+
+        Args:
+            df: DataFrame containing results (Method, Test Size, MAE)
+            title: Title for the plot
+        """
+        # --- Global Font & Style Settings ---
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.serif": ["Times New Roman"],
+            "axes.labelsize": 18,
+            "axes.titlesize": 20,
+            "legend.fontsize": 10,
+            "xtick.labelsize": 16,
+            "ytick.labelsize": 16,
+            "lines.linewidth": 3,
+            "lines.markersize": 10
+        })
+
+        # --- Ensure correct data types ---
+        df['Method'] = df['Method'].astype('category')
+        df['Test Size'] = df['Test Size'].astype(float)
+
+        fig, axes = plt.subplots(1, 2, figsize=(9, 9))  # **Square Figures**
+        # print(df.dtypes)
+        # print(df.head())
+        # print(df["Test Size"].unique())
+        # print(df["Method"].unique())
+        df["MAE"] = pd.to_numeric(df["MAE"], errors="coerce")  # Convert to float, set errors to NaN
+
+        # --- Violin Plot (Error distribution) ---
+        sns.violinplot(
+            data=df, x="Test Size", y="MAE", hue="Method",
+            palette="Reds", inner="box", density_norm="width", ax=axes[0]
+        )
+        axes[0].set_title(f"{title} Violin", fontsize=20)
+        axes[0].set_xlabel("Test Size", fontsize=18)
+        axes[0].set_ylabel("MAE", fontsize=18)
+        axes[0].grid(True, linestyle="dotted", linewidth=1.5)
+        axes[0].legend(loc="upper right", frameon=True)
+
+        # --- Line Plot with Symbols and Custom Line Styles ---
+        markers = {
+            "IDW": "o", "Kriging": "s", "Ensemble": "D",
+            "U-Net": "^", "[OURS] Splatformer": "X"
+        }
+        linestyles = {
+            "IDW": "--", "Kriging": "-.", "Ensemble": ":", 
+            "U-Net": (0, (3, 1, 1, 1)), "[OURS] Splatformer": "-"  # Splatformer always solid
+        }
+
+        unique_methods = df["Method"].unique()
+        for method in unique_methods:
+            method_df = df[df["Method"] == method]
+            sns.lineplot(
+                data=method_df, x="Test Size", y="MAE",
+                label=method, marker=markers.get(method, "X"),  
+                linestyle=linestyles.get(method, "--"),  
+                markersize=10, linewidth=3, ax=axes[1]
+            )
+
+        axes[1].set_title(f"{title} Line", fontsize=20)
+        axes[1].set_xlabel("Test Size", fontsize=18)
+        axes[1].set_ylabel("MAE", fontsize=18)
+        axes[1].grid(True, linestyle="dotted", linewidth=1.5)
+        axes[1].legend(loc="upper right", frameon=True)
+
+        plt.tight_layout()
+
+        # --- Save figure as PDF ---
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
+        filename = f"crosslayer_performance_{timestamp}.pdf"
+        plt.savefig(filename, format="pdf", bbox_inches="tight", dpi=300)
+        print(f"Figure saved as {filename}")
+
         plt.show()
         # Now run your plotting
         # plot_violin(df_random, "Performance of Methods (Random Split)")
         # plot_violin(df_block, "Performance of Methods (Block Split)")
 
 
-    plot_results(df_random, "Cross-layer projection - Performance of Methods (Random Split)")
-    plot_results(df_block, "Cross-layer projection - Performance of Methods (Block Split)")
+    plot_results(df_random, "Cross-layer Perf. (Random)")
+    plot_results(df_block, "Cross-layer Perf. (Block)")
                  
     return df_random, df_block
 
@@ -850,13 +1006,42 @@ if __name__ == '__main__':
     # evaluation_instance(file_name="CONF/cleaned_rows.csv")
     # evaluation_sequence(file_name="CONF/cleaned_spiral.csv", runs=20)
     
-    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=5))
+    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=20, epochs=100))
 
     # train_block_features  = pd.read_csv("CONF/cleaned_rows.csv")
-    # plot_flightpath_with_distances(train_block_features, tower_location=tower_position)
-    # plot_flightpath_with_arrows(train_block_features, tower_location=tower_position)
+    # plot_flightpath_combined(train_block_features, tower_location=tower_position)
     # plot_sinr_weighted_rssi(train_block_features)
 
-    # df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=2, epochs=20) # train on 20m rows, predict 15m spiral
-    df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=2, epochs=5)#train on 15m spiral, predict 20m rows
+    # df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=5, epochs=10)# train on 20m rows, predict 15m spiral
+    # df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=5, epochs=10)#rain on 15m spiral, predict 20m rows
     # print(df_comparison)
+
+    # Figure 4: Rows and SPiral single layer perfomance
+    # print(evaluation_seq_2(file_name="CONF/cleaned_spiral.csv", runs=3, epochs=5))
+    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=1, epochs=10))
+
+
+
+
+    #  Conference figures 
+
+    ### Fig. 3. Example test-train split
+    # _, _, _, _ = perform_splits(filename="CONF/cleaned_spiral.csv", this_test_size=0.3, this_n_clusters=10, this_test_fraction=0.3, visualise=True)
+    
+    ### Fig. 4. Engineered feature - Distance to Tower, Bearing of Tower, SINR Weighting
+    # rows_example_features  = pd.read_csv("CONF/cleaned_rows.csv")
+    # spiral_example_features  = pd.read_csv("CONF/cleaned_spiral.csv")
+    # plot_flightpath_combined(rows_example_features, tower_location=tower_position)
+    # plot_flightpath_combined(spiral_example_features, tower_location=tower_position)
+    # plot_sinr_weighted_rssi(rows_example_features)
+
+    ### Figure 5 & 6. Rows and Spiral Single-layer prediction
+    # print(evaluation_seq_2(file_name="CONF/cleaned_spiral.csv", runs=2, epochs=1))
+    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=5, epochs=10))
+
+    ### Figure 7 & 8. RSSI layer-to-layer projection
+    df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=3, epochs=2) # train on 20m rows, predict 15m spiral, 50 runs over 200 epoch: 4hrs
+    # df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=50, epochs=200) #rain on 15m spiral, predict 20m rows
+    
+
+    

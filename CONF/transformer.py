@@ -9,21 +9,55 @@ from sklearn.preprocessing import StandardScaler
 import config
 from feature_engineering import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi
 
+# class GaussianTransformer(nn.Module):
+#     def __init__(self, input_dim, embed_dim=64, num_heads=4, num_layers=2):
+#         super(GaussianTransformer, self).__init__()
+        
+#         # Ensure input_dim matches what is in train_random_features
+#         print(f"Expected input_dim: {input_dim}")  # Debugging print
+
+#         self.pos_encoding = nn.Parameter(torch.zeros(1, input_dim, embed_dim)) # pose encoding
+        
+#         self.embedding = nn.Linear(input_dim, embed_dim)  # Correct input dim
+#         self.encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
+#         self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)
+#         self.decoder = nn.Linear(embed_dim, 1)  # Predict signal strength
+
+#     def forward(self, x):
+#         x = self.embedding(x)  # Ensure embedding works with input size
+#         return self.decoder(x)
+
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
+
 class GaussianTransformer(nn.Module):
     def __init__(self, input_dim, embed_dim=64, num_heads=4, num_layers=2):
         super(GaussianTransformer, self).__init__()
-        
-        # Ensure input_dim matches what is in train_random_features
+
         print(f"Expected input_dim: {input_dim}")  # Debugging print
-        
-        self.embedding = nn.Linear(input_dim, embed_dim)  # Correct input dim
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
-        self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)
-        self.decoder = nn.Linear(embed_dim, 1)  # Predict signal strength
+
+        self.embedding = nn.Linear(input_dim, embed_dim)  # Maps input_dim to embed_dim
+
+        # correct positional encoding shape: (1, 1, embed_dim) so it can be broadcasted
+        self.pos_encoding = nn.Parameter(torch.zeros(1, embed_dim))
+
+        # Transformer Encoder
+        encoder_layers = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
+        self.transformer = nn.TransformerEncoder(encoder_layers, num_layers=num_layers)
+
+        self.decoder = nn.Linear(embed_dim, 1)  # Output single value (e.g., signal strength)
 
     def forward(self, x):
-        x = self.embedding(x)  # Ensure embedding works with input size
-        return self.decoder(x)
+        x = self.embedding(x)  # Shape: (batch_size, embed_dim)
+
+        #corect way to apply positional encoding
+        x = x + self.pos_encoding  # Broadcasting to match (batch_size, embed_dim)
+
+        x = self.transformer(x)  # Pass through Transformer Encoder
+        return self.decoder(x)  # Predict signal strength
+
+
 
 
 def generate_gaussian_features_old(data):
@@ -39,7 +73,7 @@ def generate_gaussian_features_old(data):
     if not isinstance(data, pd.DataFrame):
         raise TypeError("Expected a DataFrame, but got {}".format(type(data)))
 
-    print("FOR generate_gaussian_features _>>>>>>>Available columns in data:", data.columns)
+    # print("FOR generate_gaussian_features _>>>>>>>Available columns in data:", data.columns)
     
     required_columns = ['gps.lat', 'gps.lon', 'altitudeAMSL', 'localPosition.x', 'localPosition.y', 'localPosition.z', 'rsrp', 'rsrq', 'rssi', 'sinr', 'covariance']
     print(data.columns)

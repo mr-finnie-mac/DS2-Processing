@@ -7,6 +7,57 @@ import config
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+
+def plot_gaussian_splats(data, tower_location):
+    """
+    Plots the Gaussian splat footprints using covariance information.
+
+    Args:
+        data (pd.DataFrame): DataFrame containing 'gps.lon', 'gps.lat', and 'covariance'.
+        tower_location (tuple): (lat, lon) of the cellular tower.
+    """
+    fig, ax = plt.subplots(figsize=(9, 9))
+
+    # Scatter the Gaussian centers
+    sc = ax.scatter(data["gps.lon"], data["gps.lat"], c=data["rssi"], cmap="coolwarm", edgecolors="black", alpha=0.8)
+    plt.colorbar(sc, label="RSSI Intensity")
+
+    # Iterate through each point and plot Gaussian splat
+    for i, row in data.iterrows():
+        lon, lat = row["gps.lon"], row["gps.lat"]
+        cov_matrix = np.array(row["covariance"]).reshape(2, 2)  # Assuming 2D covariance
+
+        # Compute eigenvalues and eigenvectors for shape & rotation
+        eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+        angle = np.degrees(np.arctan2(*eigenvectors[:, 0][::-1]))  # Convert to degrees
+
+        # Define width and height based on eigenvalues (spread of Gaussian)
+        width, height = 2 * np.sqrt(eigenvalues)  # Scale factor for visualization
+
+        # Create and add the ellipse (Gaussian footprint)
+        ellipse = Ellipse(
+            xy=(lon, lat), width=width, height=height, angle=angle,
+            edgecolor="black", facecolor="none", linestyle="dashed", linewidth=1
+        )
+        ax.add_patch(ellipse)
+
+    # Plot the tower location
+    ax.scatter(tower_location[1], tower_location[0], color="red", marker="*", s=300, label="Tower")
+
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    ax.set_title("Gaussian Splat Footprints")
+    ax.legend()
+    plt.grid(True, linestyle="dotted")
+
+    # Save as PDF
+    plt.savefig("gaussian_splats.pdf", format="pdf", bbox_inches="tight", dpi=300)
+    print("Figure saved as gaussian_splats.pdf")
+
+    plt.show()
+
 
 def compute_anisotropic_covariance(data, fixed_dim=10):
     """Computes anisotropic covariance and ensures fixed dimensionality."""

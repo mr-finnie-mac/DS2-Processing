@@ -51,6 +51,18 @@ def spatial_block_split(df, n_clusters=10, test_fraction=0.2, positions = 0):
 
 
 def visualize_splits(train_random, test_random, train_block, test_block, saveFig = False, test_size=0.2):
+    # --- Global Font & Style Settings ---
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman"],
+        "axes.labelsize": 18,
+        "axes.titlesize": 20,
+        "legend.fontsize": 18,
+        "xtick.labelsize": 16,
+        "ytick.labelsize": 16,
+        "lines.linewidth": 3,  # Thick lines
+        "lines.markersize": 10  # Large markers
+    })
     plt.figure(figsize=(12, 5))
 
     # Count unique points based on lat and lon
@@ -61,18 +73,18 @@ def visualize_splits(train_random, test_random, train_block, test_block, saveFig
 
     # Random Split
     plt.subplot(1, 2, 1)
-    plt.scatter(train_random["gps.lat"], train_random["gps.lon"], color="blue", label=f"Train ({random_train_unique})", alpha=1, s=15)
-    plt.scatter(test_random["gps.lat"], test_random["gps.lon"], color="green", label=f"Test ({random_test_unique})", alpha=1, s=15)
-    plt.title(f"Random Split: Train={random_train_unique}, Test={random_test_unique}")
+    plt.scatter(train_random["gps.lat"], train_random["gps.lon"], color="blue", label=f"Train ({random_train_unique})", alpha=1, s=25)
+    plt.scatter(test_random["gps.lat"], test_random["gps.lon"], color="green", label=f"Test ({random_test_unique})", alpha=1, s=55)
+    plt.title(f"Random Split")
     plt.xlabel("RTK Latitude")
     plt.ylabel("RTK Longitude")
     plt.legend()
 
     # Block Split
     plt.subplot(1, 2, 2)
-    plt.scatter(train_block["gps.lat"], train_block["gps.lon"], color="blue", label=f"Train ({block_train_unique})", alpha=1,  s=15)
-    plt.scatter(test_block["gps.lat"], test_block["gps.lon"], color="green", label=f"Test ({block_test_unique})", alpha=1, s=15)
-    plt.title(f"Block Split: Train={block_train_unique}, Test={block_test_unique}")
+    plt.scatter(train_block["gps.lat"], train_block["gps.lon"], color="blue", label=f"Train ({block_train_unique})", alpha=1,  s=25)
+    plt.scatter(test_block["gps.lat"], test_block["gps.lon"], color="green", label=f"Test ({block_test_unique})", alpha=1, s=55)
+    plt.title(f"Block Split")
     plt.xlabel("RTK Latitude")
     plt.ylabel("RTK Longitude")
     plt.legend()
@@ -83,6 +95,7 @@ def visualize_splits(train_random, test_random, train_block, test_block, saveFig
         now = datetime.now() # current date and time
         date_time = now.strftime("%d-%m-%Y_%H-%M-%S")
         plt.savefig("CONF/figures/test-train windows/test-train-window_"+str(test_size)+"_"+date_time+".png")
+        plt.show()
     else:
         plt.show()
     
@@ -97,7 +110,7 @@ def normalize_dataset(df):
     return df, scaler  # Return scaler in case we need to inverse transform later
 
 
-def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clusters = 9, this_test_fraction = 0.2):
+def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clusters = 9, this_test_fraction = 0.2, visualise=False):
     # Load dataset (modify path as needed)
     this_df = pd.read_csv(filename)
 
@@ -121,7 +134,7 @@ def perform_splits(filename = "placeholder.csv", this_test_size=0.2, this_n_clus
     print(f"Random Split -> Train: {len(train_random)}, Test: {len(test_random)}")
     print(f"Block Split  -> Train: {len(train_block)}, Test: {len(test_block)}")
 
-    # visualize_splits(train_random, test_random, train_block, test_block, True, this_test_size) # if want to see the distibution of test and train points
+    if visualise: visualize_splits(train_random, test_random, train_block, test_block, True, this_test_size) # if want to see the distibution of test and train points
 
 
     return train_random, test_random, train_block, test_block, scaler
