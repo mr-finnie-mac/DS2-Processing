@@ -22,10 +22,22 @@ import config
 
 # Random Point Subsampling
 def random_point_subsampling(df, test_size=0.2):
-    train_df, test_df = train_test_split(df, test_size=test_size, random_state=42)
+    if len(config.rand_states) < 2:
+        raise ValueError("rand_states must contain at least two values (current + next states).")
+
+    current_index = config.rand_states[0]  # Current position in the list
+    random_state = config.rand_states[current_index]  # Get the random state
+    print(f"Random states index: {current_index} with value: {random_state}")
+
+    # Move to the next random state (wrap around if at the end)
+    next_index = (current_index + 1) % (len(config.rand_states) - 1)
+    config.rand_states[0] = next_index  # Update index in config
+
+    train_df, test_df = train_test_split(df, test_size=test_size, random_state=random_state)
     return train_df, test_df
 
 # train_random, test_random = random_point_subsampling(df, test_size=0.2)
+
 
 
 # Spatial Block Splitting

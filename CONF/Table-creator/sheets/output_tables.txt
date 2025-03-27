@@ -1,0 +1,176 @@
+
+    % Table generated for rows_cross_ds_block_20250324_204150467.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 82.964082 & 82.222166 & 82.044256 & 82.150042 & 82.136366 \\ \hline
+IDW & 118.119560 & 117.870082 & 117.634329 & 117.788833 & 117.679604 \\ \hline
+Kriging & 95.477817 & 95.026696 & 94.780959 & 94.942621 & 94.840449 \\ \hline
+Splatformer & 0.320765 & 0.324296 & 0.331069 & 0.352512 & 0.321545 \\ \hline
+U-Net & 0.311996 & 0.543332 & 0.744691 & 0.522339 & 0.723633 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for rows_cross_ds_block_20250324_204150467.csv}
+        \label{tab:rows_cross_ds_block_20250324_204150467}
+    \end{table}
+    
+
+
+    % Table generated for rows_cross_ds_random_20250324_204150429.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 82.217428 & 82.135696 & 82.156934 & 82.157765 & 82.127272 \\ \hline
+IDW & 117.869831 & 117.738137 & 117.778626 & 117.795154 & 117.761630 \\ \hline
+Kriging & 95.030673 & 94.887868 & 94.934894 & 94.952982 & 94.917308 \\ \hline
+Splatformer & 0.385866 & 0.344161 & 0.382135 & 0.423568 & 0.387347 \\ \hline
+U-Net & 1.653214 & 0.771489 & 0.612268 & 0.487460 & 0.699488 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for rows_cross_ds_random_20250324_204150429.csv}
+        \label{tab:rows_cross_ds_random_20250324_204150429}
+    \end{table}
+    
+
+
+    % Table generated for rows_single_ds_block_20250324_193750149.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 0.691536 & 0.633923 & 0.591667 & 0.680443 & 0.675182 \\ \hline
+IDW & 0.744696 & 0.625470 & 0.550882 & 0.665164 & 0.651789 \\ \hline
+Kriging & 0.659467 & 0.559785 & 0.593481 & 0.731725 & 0.663336 \\ \hline
+Splatformer & 0.369452 & 0.284808 & 0.275450 & 0.345700 & 0.303156 \\ \hline
+U-Net & 1.978437 & 1.469969 & 0.908463 & 0.582490 & 1.037317 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for rows_single_ds_block_20250324_193750149.csv}
+        \label{tab:rows_single_ds_block_20250324_193750149}
+    \end{table}
+    
+
+
+    % Table generated for rows_single_ds_random_20250324_193750116.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 0.246900 & 0.268947 & 0.309633 & 0.323976 & 0.356657 \\ \hline
+IDW & 0.250561 & 0.288598 & 0.316460 & 0.328063 & 0.345862 \\ \hline
+Kriging & 0.475867 & 0.467698 & 0.500317 & 0.482677 & 0.507701 \\ \hline
+Splatformer & 0.311944 & 0.245408 & 0.243311 & 0.231820 & 0.208021 \\ \hline
+U-Net & 0.637178 & 0.760328 & 0.566404 & 0.443933 & 0.405437 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for rows_single_ds_random_20250324_193750116.csv}
+        \label{tab:rows_single_ds_random_20250324_193750116}
+    \end{table}
+    
+
+
+    % Table generated for spiral_cross_ds_block_20250324_210717967.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 75.926194 & 75.847350 & 75.382092 & 75.186424 & 75.458887 \\ \hline
+IDW & 102.841951 & 102.864498 & 102.793703 & 102.680496 & 102.727877 \\ \hline
+Kriging & 107.786706 & 107.840033 & 108.033304 & 108.044389 & 107.910632 \\ \hline
+Splatformer & 0.284955 & 0.263800 & 0.282279 & 0.296628 & 0.282822 \\ \hline
+U-Net & 1.195421 & 0.957171 & 1.404050 & 1.825743 & 0.959093 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for spiral_cross_ds_block_20250324_210717967.csv}
+        \label{tab:spiral_cross_ds_block_20250324_210717967}
+    \end{table}
+    
+
+
+    % Table generated for spiral_cross_ds_random_20250324_210717951.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 75.630253 & 75.476059 & 75.490172 & 75.535322 & 75.466470 \\ \hline
+IDW & 102.884914 & 102.774448 & 102.803448 & 102.813087 & 102.777635 \\ \hline
+Kriging & 108.075655 & 107.969640 & 107.997460 & 108.016520 & 107.997411 \\ \hline
+Splatformer & 0.267020 & 0.331918 & 0.274114 & 0.291896 & 0.285565 \\ \hline
+U-Net & 1.203559 & 0.859062 & 0.488743 & 0.578474 & 0.774013 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for spiral_cross_ds_random_20250324_210717951.csv}
+        \label{tab:spiral_cross_ds_random_20250324_210717951}
+    \end{table}
+    
+
+
+    % Table generated for spiral_single_ds_block_20250324_201321639.csv
+    egin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        egin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 0.560192 & 0.620624 & 0.601378 & 0.674514 & 0.641473 \\ \hline
+IDW & 0.600692 & 0.572490 & 0.627241 & 0.621265 & 0.654491 \\ \hline
+Kriging & 0.572230 & 0.506502 & 0.580469 & 0.665827 & 0.688291 \\ \hline
+Splatformer & 0.203565 & 0.296195 & 0.290404 & 0.308008 & 0.310495 \\ \hline
+U-Net & 1.281860 & 2.581603 & 1.656294 & 0.613231 & 0.690918 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for spiral_single_ds_block_20250324_201321639.csv}
+        \label{tab:spiral_single_ds_block_20250324_201321639}
+    \end{table}
+    
+
+
+    % Table generated for spiral_single_ds_random_20250324_201321629.csv
+    \begin{table}[]
+        \centering
+        
+esizebox{\columnwidth}{!}{%
+        \begin{tabular}{|c|" + "|c|" * (len(pivot_df.columns) - 1) + "} 
+            \hline
+    \textbf{Method} & \textbf{0.1} & \textbf{0.2} & \textbf{0.3} & \textbf{0.4} & \textbf{0.5} \\ \hline
+Ensemble & 0.215826 & 0.286194 & 0.277256 & 0.326784 & 0.365629 \\ \hline
+IDW & 0.253342 & 0.269468 & 0.287880 & 0.328566 & 0.361749 \\ \hline
+Kriging & 0.405435 & 0.459025 & 0.478605 & 0.487198 & 0.501312 \\ \hline
+Splatformer & 0.238654 & 0.266092 & 0.222575 & 0.336469 & 0.242551 \\ \hline
+U-Net & 0.603291 & 0.635988 & 0.519437 & 0.464210 & 0.500958 \\ \hline
+
+        \end{tabular}%
+        }
+        \caption{Mean Absolute Error (MAE) for spiral_single_ds_random_20250324_201321629.csv}
+        \label{tab:spiral_single_ds_random_20250324_201321629}
+    \end{table}
+    
+

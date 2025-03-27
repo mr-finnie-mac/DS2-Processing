@@ -10,6 +10,28 @@ from scipy.spatial.distance import pdist, squareform
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
+# for presenting splatts after flattening, revesres list to covariece matrix
+def preprocess_gaussian_data(data):
+    """
+    Ensures the covariance matrices are in a valid 2x2 format for visualization.
+    Args:
+        data (pd.DataFrame): DataFrame with a 'covariance' column.
+    Returns:
+        Processed DataFrame with reshaped covariance.
+    """
+    processed_data = data.copy()
+
+    def reshape_cov(cov_list):
+        try:
+            # Take the first 4 elements and reshape into a 2x2 matrix
+            cov_matrix = np.array(cov_list[:4]).reshape(2, 2)
+            return cov_matrix
+        except:
+            return np.array([[1, 0], [0, 1]])  # Default identity matrix if error
+
+    processed_data["covariance"] = processed_data["covariance"].apply(reshape_cov)
+    return processed_data
+
 def plot_gaussian_splats(data, tower_location):
     """
     Plots the Gaussian splat footprints using covariance information.
@@ -27,21 +49,43 @@ def plot_gaussian_splats(data, tower_location):
     # Iterate through each point and plot Gaussian splat
     for i, row in data.iterrows():
         lon, lat = row["gps.lon"], row["gps.lat"]
-        cov_matrix = np.array(row["covariance"]).reshape(2, 2)  # Assuming 2D covariance
+        
+        # Print first covariance row for debugging
+        cov_raw = np.array(row["covariance"])
+        print(f"Index {i} Covariance: {cov_raw}")
 
-        # Compute eigenvalues and eigenvectors for shape & rotation
-        eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
-        angle = np.degrees(np.arctan2(*eigenvectors[:, 0][::-1]))  # Convert to degrees
+        try:
+            if len(cov_raw) == 10:  # 10D covariance case
+                # Assume first 6 elements are the diagonal and off-diagonal elements in a 3x3 matrix
+                cov_matrix = np.array([
+                    [cov_raw[0], cov_raw[1], cov_raw[2]],
+                    [cov_raw[1], cov_raw[3], cov_raw[4]],
+                    [cov_raw[2], cov_raw[4], cov_raw[5]]
+                ])
 
-        # Define width and height based on eigenvalues (spread of Gaussian)
-        width, height = 2 * np.sqrt(eigenvalues)  # Scale factor for visualization
+            else:
+                print(f"Unexpected covariance shape at index {i}: {cov_raw}")
+                continue  # Skip this point if covariance shape is wrong
 
-        # Create and add the ellipse (Gaussian footprint)
-        ellipse = Ellipse(
-            xy=(lon, lat), width=width, height=height, angle=angle,
-            edgecolor="black", facecolor="none", linestyle="dashed", linewidth=1
-        )
-        ax.add_patch(ellipse)
+            # Compute eigenvalues and eigenvectors
+            eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+
+            # Ensure eigenvalues are non-negative (fix sqrt issue)
+            eigenvalues = np.maximum(eigenvalues, 0)
+
+            # Compute ellipse parameters
+            width, height = 2 * np.sqrt(eigenvalues)  # Scale factor for visualization
+            angle = np.degrees(np.arctan2(*eigenvectors[:, 0][::-1]))  # Convert to degrees
+
+            # Create and add the ellipse (Gaussian footprint)
+            ellipse = Ellipse(
+                xy=(lon, lat), width=width, height=height, angle=angle,
+                edgecolor="black", facecolor="none", linestyle="dashed", linewidth=1
+            )
+            ax.add_patch(ellipse)
+
+        except Exception as e:
+            print(f"Error processing covariance at index {i}: {e}")
 
     # Plot the tower location
     ax.scatter(tower_location[1], tower_location[0], color="red", marker="*", s=300, label="Tower")
@@ -58,6 +102,15 @@ def plot_gaussian_splats(data, tower_location):
 
     plt.show()
 
+def adaptively_cluster_points(df, eps=0.1, min_samples=5):
+    """
+    Use DBSCAN to cluster points adaptively based on spatial density.
+    """
+    coords = df[['gps.lat', 'gps.lon', 'altitudeAMSL']].values  # Spatial coordinates
+    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(coords)
+    df['cluster'] = clustering.labels_  # Assign cluster labels
+    # print(f"CLUSTERS:{df['cluster']}")
+    return df
 
 def compute_anisotropic_covariance(data, fixed_dim=10):
     """Computes anisotropic covariance and ensures fixed dimensionality."""
@@ -79,14 +132,7 @@ def compute_anisotropic_covariance(data, fixed_dim=10):
     return np.array(covariance_vectors)
 
 
-def adaptively_cluster_points(df, eps=0.001, min_samples=5):
-    """
-    Use DBSCAN to cluster points adaptively based on spatial density.
-    """
-    coords = df[['gps.lat', 'gps.lon', 'altitudeAMSL']].values  # Spatial coordinates
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(coords)
-    df['cluster'] = clustering.labels_  # Assign cluster labels
-    return df
+
 
 def create_gaussian_representation(data):
     """

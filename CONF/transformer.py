@@ -40,7 +40,7 @@ class GaussianTransformer(nn.Module):
         self.embedding = nn.Linear(input_dim, embed_dim)  # Maps input_dim to embed_dim
 
         # correct positional encoding shape: (1, 1, embed_dim) so it can be broadcasted
-        self.pos_encoding = nn.Parameter(torch.zeros(1, embed_dim))
+        self.pos_encoding = nn.Parameter(torch.zeros(1, embed_dim)) # add in desciption
 
         # Transformer Encoder
         encoder_layers = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
@@ -166,13 +166,13 @@ def train_gaussian_transformer(features, train_data, epochs=20, lr=0.001):
 
     y_train = torch.tensor(train_data["rssi"].values, dtype=torch.float32).unsqueeze(1)
 
-    print(f"Final shape of training features: {X_train.shape}")  # Debugging print
+    print(f"Final shape of training features: {X_train}")  # Debugging print
 
     # Fix the transformer input dimension
     model = GaussianTransformer(input_dim=X_train.shape[1])  
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
+    criterion = nn.MSELoss() # sqr is diffrentiable
 
     for epoch in range(epochs):
         optimizer.zero_grad()
@@ -201,6 +201,7 @@ def evaluate_gaussian_transformer(model, test_data, test_features):
 
     Returns:
         float: Mean Absolute Error (MAE).
+        tensor: y_pred - beware it will mess up other funcs, remove if homogenious errors arise
     """
     X_test = torch.tensor(test_features, dtype=torch.float32)
     y_test = torch.tensor(test_data["rssi"].values, dtype=torch.float32).unsqueeze(1)

@@ -64,7 +64,7 @@ def build_unet(input_shape=(64, 64, 3)):
     c7 = LeakyReLU(negative_slope=0.1)(c7)
     c7 = BatchNormalization()(c7)
 
-    outputs = Conv2D(1, (1, 1), activation='linear')(c7)  # Output is signal strength
+    outputs = Conv2D(1, (1, 1), activation='relu')(c7)  # Output is signal strength
 
     model = Model(inputs, outputs)
     # model.compile(optimizer='adam', loss=tf.keras.losses.Huber(), metrics=['mae'])
