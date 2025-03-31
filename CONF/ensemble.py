@@ -7,7 +7,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from spatial_test_train_split import perform_splits
 import config
 from sklearn.preprocessing import StandardScaler
-
+import joblib
+import pickle
 
 
 # # Load and split dataset using spatial methods
@@ -18,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 # signal_cols = ["rsrq", "rsrp", "rssi", "sinr"]
 
 # Define function to train models and compute ensemble
-def train_and_evaluate(train_df, test_df, target_col="rssi", position_cols=0):
+def train_and_evaluate(train_df, test_df, target_col="rsrp", position_cols=0):
 
     # print("Columns in train_df:", list(train_df.columns))
     # print("position_cols:", position_cols)
@@ -57,6 +58,10 @@ def train_and_evaluate(train_df, test_df, target_col="rssi", position_cols=0):
 
     # Simple Averaging Ensemble
     ensemble_pred = (rf_pred + xgb_pred + lgb_pred) / 3
+
+    
+
+    joblib.dump(ensemble_pred, "ensemble_model.pkl")
 
     # Evaluate performance
     def evaluate(y_true, y_pred):

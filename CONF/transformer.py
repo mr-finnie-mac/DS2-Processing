@@ -150,15 +150,7 @@ def generate_gaussian_features(data, tower_location=(52.60818, 1.542818, 15.2)):
     print("Max values:", np.max(features, axis=0))
     print("Any NaNs?", np.isnan(features).any())
 
-
-
     return features
-
-
-
-
-
-
 
 
 def train_gaussian_transformer(features, train_data, epochs=20, lr=0.001):

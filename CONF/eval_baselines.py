@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 from keras.callbacks import EarlyStopping
 import sys
 from transformer import train_gaussian_transformer, evaluate_gaussian_transformer, generate_gaussian_features
-from gaussian import compute_anisotropic_covariance, adaptively_cluster_points, create_gaussian_representation, plot_gaussian_splats
-from feature_engineering import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi, plot_flightpath_with_arrows, plot_flightpath_with_distances, plot_sinr_weighted_rssi, plot_flightpath_with_diamonds, plot_flightpath_combined
+from gaussian import compute_anisotropic_covariance, plot_clusters_with_gaussians, cluster_and_assign_means, create_gaussians_for_clusters, adaptively_cluster_points, new_generate_gaussian_features, create_gaussian_representation, plot_gaussian_splats
+from feature_engineering import compute_tower_direction_local, compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi, plot_flightpath_with_arrows, plot_flightpath_with_distances, plot_sinr_weighted_rssi, plot_flightpath_with_diamonds, plot_flightpath_combined
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
 # 52.60818, 1.542818, altitudeAMSL: 15.2
@@ -192,72 +192,140 @@ def evaluate_unet(model, test_df):
     return mae, rmse
 
 
+# def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, epochs=20):
+#     """
+#     Executes the Gaussian Splatting + Transformer method on the dataset.
+#     """
+
+#     print("Processing Splatformer Method for Test Size:", test_size)
+
+#     # Required feature columns
+#     cols_needed = [
+#         "gps.lat", "gps.lon", "altitudeAMSL", 
+#         "localPosition.x", "localPosition.y", "localPosition.z",
+#         "rsrp", "rsrq", "rssi", "sinr"
+#     ]
+
+#     # filter out only relevant columns
+#     this_train_random = this_train_random[cols_needed].copy()
+#     this_test_random = this_test_random[cols_needed].copy()
+#     this_train_block = this_train_block[cols_needed].copy()
+#     this_test_block = this_test_block[cols_needed].copy()
+
+#     # cluster
+#     print("Clustering training data...")
+#     clustered_train_random = adaptively_cluster_points(this_train_random)
+#     clustered_train_block = adaptively_cluster_points(this_train_block)
+
+#     # ghenerate Gaussians for each cluster
+#     print("Generating Gaussian Representations...")
+    
+#     train_random_gaussians = []
+#     for cluster_id in clustered_train_random['cluster'].unique():
+#         if cluster_id == -1: continue  # Skip noise points
+#         cluster_data = clustered_train_random[clustered_train_random['cluster'] == cluster_id]
+#         train_random_gaussians.append(create_gaussian_representation(cluster_data))
+
+#     train_block_gaussians = []
+#     for cluster_id in clustered_train_block['cluster'].unique():
+#         if cluster_id == -1: continue
+#         cluster_data = clustered_train_block[clustered_train_block['cluster'] == cluster_id]
+#         train_block_gaussians.append(create_gaussian_representation(cluster_data))
+
+#     # convert list of Gaussians into a single DataFrame
+#     train_random_gaussians = pd.concat(train_random_gaussians, ignore_index=True)
+#     train_block_gaussians = pd.concat(train_block_gaussians, ignore_index=True)
+
+#     # debugging
+#     print(f"Number of clusters in train_random: {clustered_train_random['cluster'].nunique()}")
+#     print(f"Number of clusters in train_block: {clustered_train_block['cluster'].nunique()}")
+
+#     #Convert Gaussian Data into Features
+#     print("Converting Gaussian Features to DataFrames...")
+#     train_random_features = generate_gaussian_features(pd.DataFrame(train_random_gaussians), tower_location=tower_position)
+#     train_block_features = generate_gaussian_features(pd.DataFrame(train_block_gaussians), tower_location=tower_position)
+
+#     # train Transformer Model
+#     print("Training Transformer on Random Split...")
+#     splatformer_random_model = train_gaussian_transformer(train_random_features, this_train_random, epochs=epochs)
+
+#     print("Training Transformer on Block Split...")
+#     splatformer_block_model = train_gaussian_transformer(train_block_features, this_train_block, epochs=epochs)
+
+#     # Test Set 
+#     test_random_gaussians = create_gaussian_representation(this_test_random)
+#     test_block_gaussians = create_gaussian_representation(this_test_block)
+
+#     test_random_features = generate_gaussian_features(pd.DataFrame(test_random_gaussians), tower_location=tower_position)
+#     test_block_features = generate_gaussian_features(pd.DataFrame(test_block_gaussians), tower_location=tower_position)
+
+#     # Evaluate model on test set
+#     splatformer_rand_mae = evaluate_gaussian_transformer(splatformer_random_model, this_test_random, test_random_features)
+#     splatformer_block_mae = evaluate_gaussian_transformer(splatformer_block_model, this_test_block, test_block_features)
+
+#     return splatformer_rand_mae, splatformer_block_mae
 def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, epochs=20):
     """
-    Executes the Gaussian Splatting + Transformer method on the dataset.
+    Executes Gaussian Splatting + Transformer method.
     """
 
     print("Processing Splatformer Method for Test Size:", test_size)
 
-    # Required feature columns
     cols_needed = [
         "gps.lat", "gps.lon", "altitudeAMSL", 
         "localPosition.x", "localPosition.y", "localPosition.z",
         "rsrp", "rsrq", "rssi", "sinr"
     ]
 
-    # filter out only relevant columns
+
+
     this_train_random = this_train_random[cols_needed].copy()
     this_test_random = this_test_random[cols_needed].copy()
     this_train_block = this_train_block[cols_needed].copy()
     this_test_block = this_test_block[cols_needed].copy()
 
-    # cluster
+    #cluster Training Data
     print("Clustering training data...")
-    clustered_train_random = adaptively_cluster_points(this_train_random)
-    clustered_train_block = adaptively_cluster_points(this_train_block)
+    clustered_train_random = cluster_and_assign_means(this_train_random)
+    clustered_train_block = cluster_and_assign_means(this_train_block)
 
-    # ghenerate Gaussians for each cluster
+    # create Gaussian Representations per Cluster
     print("Generating Gaussian Representations...")
-    
-    train_random_gaussians = []
-    for cluster_id in clustered_train_random['cluster'].unique():
-        if cluster_id == -1: continue  # Skip noise points
-        cluster_data = clustered_train_random[clustered_train_random['cluster'] == cluster_id]
-        train_random_gaussians.append(create_gaussian_representation(cluster_data))
+    train_random_gaussians = create_gaussians_for_clusters(clustered_train_random)
+    train_block_gaussians = create_gaussians_for_clusters(clustered_train_block)
+    # plot_clusters_with_gaussians(train_random_gaussians)
 
-    train_block_gaussians = []
-    for cluster_id in clustered_train_block['cluster'].unique():
-        if cluster_id == -1: continue
-        cluster_data = clustered_train_block[clustered_train_block['cluster'] == cluster_id]
-        train_block_gaussians.append(create_gaussian_representation(cluster_data))
-
-    # convert list of Gaussians into a single DataFrame
-    train_random_gaussians = pd.concat(train_random_gaussians, ignore_index=True)
-    train_block_gaussians = pd.concat(train_block_gaussians, ignore_index=True)
-
-    # debugging
-    print(f"Number of clusters in train_random: {clustered_train_random['cluster'].nunique()}")
-    print(f"Number of clusters in train_block: {clustered_train_block['cluster'].nunique()}")
-
-    #Convert Gaussian Data into Features
+    # Convert Gaussian Data into Features
     print("Converting Gaussian Features to DataFrames...")
-    train_random_features = generate_gaussian_features(pd.DataFrame(train_random_gaussians), tower_location=tower_position)
-    train_block_features = generate_gaussian_features(pd.DataFrame(train_block_gaussians), tower_location=tower_position)
+    # train_random_features = generate_gaussian_features(train_random_gaussians, tower_location=tower_position)
+    # train_block_features = generate_gaussian_features(train_block_gaussians, tower_location=tower_position)
 
     # train Transformer Model
-    print("Training Transformer on Random Split...")
-    splatformer_random_model = train_gaussian_transformer(train_random_features, this_train_random, epochs=epochs)
+    # dist_to_tower = compute_distance_to_tower(data, tower_location).values.reshape(-1, 1)
+    # azimuth, elevation = compute_tower_direction(data, tower_location)
+    # sinr_weighted_rssi = compute_sinr_weighted_rssi(data).values.reshape(-1, 1)
+    # print("Training Transformer on Random Split...")
+    # train_random_gaussians = np.hstack([train_random_gaussians
+    #     dist_to_tower,  # Standard features
+    #     sinr_weighted_rssi,       # New feature
+    #     dist_to_tower,            # New feature
+    #     azimuth, elevation,       # New directional features
+    #     covariance_features       # Covariance matrix
+    # ])
+    # scaler = StandardScaler()
+    # features = scaler.fit_transform(features)
+    splatformer_random_model = train_gaussian_transformer(train_random_gaussians, this_train_random, epochs=epochs)
 
     print("Training Transformer on Block Split...")
-    splatformer_block_model = train_gaussian_transformer(train_block_features, this_train_block, epochs=epochs)
+    splatformer_block_model = train_gaussian_transformer(train_block_gaussians, this_train_block, epochs=epochs)
 
-    # Test Set 
+    #Test Set (No Clustering, Just Evaluate)
     test_random_gaussians = create_gaussian_representation(this_test_random)
     test_block_gaussians = create_gaussian_representation(this_test_block)
 
-    test_random_features = generate_gaussian_features(pd.DataFrame(test_random_gaussians), tower_location=tower_position)
-    test_block_features = generate_gaussian_features(pd.DataFrame(test_block_gaussians), tower_location=tower_position)
+    test_random_features = new_generate_gaussian_features(test_random_gaussians, tower_location=tower_position)
+    test_block_features = new_generate_gaussian_features(test_block_gaussians, tower_location=tower_position)
+
 
     # Evaluate model on test set
     splatformer_rand_mae = evaluate_gaussian_transformer(splatformer_random_model, this_test_random, test_random_features)
@@ -1018,6 +1086,232 @@ def evaluate_cross_dataset(train_file, test_file, runs=5, epochs=20):
     plot_results(df_block, f"{train_file}Cross-layer Perf. (Block)")
                     
     return df_random, df_block
+  # Input
+    # train_random, test_random, train_block, test_block, scaler = perform_splits(
+    #             filename=file_name,
+    #             this_test_size=0.3, 
+    #             this_n_clusters=20, 
+    #             this_test_fraction=0.3
+    #         )
+
+import torch
+import torch.nn as nn
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+def new_method(file_name="CONF/cleaned_rows.csv", show_res=True):
+    plt.rcParams.update({
+            "font.family": "serif",
+            "font.serif": ["Times New Roman"],
+            "axes.labelsize": 18,
+            "axes.titlesize": 20,
+            "legend.fontsize": 12,
+            "xtick.labelsize": 16,
+            "ytick.labelsize": 16,
+            "lines.linewidth": 3,
+            "lines.markersize": 10
+        })
+
+    # Input
+    # Load dataset
+    dataset = pd.read_csv(file_name)
+    train = dataset[['gps.lat', 'gps.lon', 'altitudeAMSL', 'localPosition.x','localPosition.y','localPosition.z', 'pressure', 'temperature', 'humidity', 'gas_resistance']]
+
+    # Feature engineering
+    # Tower distance
+    distances = compute_distance_to_tower(train, tower_location=tower_position)/1000
+    train['distance_to_tower'] = distances
+    # Tower direction
+    _, elevation_angle = compute_tower_direction_local(train)
+    azimuths,_ = compute_tower_direction(train, tower_location=tower_position)
+    train['azimuth'] = azimuths # add az to input
+    train['elevation_angle'] = elevation_angle # add e angle to input
+    print(distances, azimuths, elevation_angle)
+
+    # Input features: spatial relationships + absolute positioning
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL', 'pressure', 'temperature', 'humidity', 'gas_resistance']
+    
+    # for testing
+    sinr_values = dataset['sinr'].values  # SINR for loss weighting
+    true_rsrp = dataset['rsrp'].values  # Actual RSRP values
+    true_rsrq = dataset['rsrq'].values  # Actual RSRQ values
+    true_sinr = dataset['sinr'].values  # Actual SINR values
+
+    # Normalize input features
+    scaler = StandardScaler()
+    X = scaler.fit_transform(train[features].values)
+
+    # Convert to PyTorch tensors
+    X_tensor = torch.tensor(X, dtype=torch.float32)
+    y_tensor = torch.stack([
+        torch.tensor(true_rsrp, dtype=torch.float32),
+        torch.tensor(true_rsrq, dtype=torch.float32),
+        torch.tensor(true_sinr, dtype=torch.float32)
+    ], dim=1)  # Stack all three as a 2D tensor
+
+    # Positional Encoding Layer
+    class PositionalEncoding(nn.Module):
+        def __init__(self, d_model, max_len=1000):
+            super(PositionalEncoding, self).__init__()
+            pe = torch.zeros(max_len, d_model)
+            position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+            div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            self.pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+
+        def forward(self, x):
+            return x + self.pe[:, :x.size(1), :].to(x.device)
+        
+    # Define Transformer Model
+    class SignalQualityTransformer(nn.Module):
+        def __init__(self, input_dim, d_model=264, nhead=4, num_layers=2):
+            super(SignalQualityTransformer, self).__init__()
+            self.embedding = nn.Linear(input_dim, d_model)  # Embed features
+            self.pos_encoder = PositionalEncoding(d_model)  # Add position info
+            self.transformer = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead),
+                num_layers=num_layers
+            )
+            self.fc = nn.Linear(d_model, 3)  # Output RSRP, RSRQ, SINR predictions
+
+        def forward(self, x):
+            x = self.embedding(x).unsqueeze(1)  # (batch_size, seq_len=1, d_model)
+            x = self.pos_encoder(x)  # Add positional encoding
+            x = self.transformer(x)  # Self-attention
+            x = self.fc(x.squeeze(1))  # (batch_size, 3)
+            return x
+
+    # Initialize Model
+    model = SignalQualityTransformer(input_dim=len(features))
+
+    # SINR-weighted Loss Function
+    class WeightedMSELoss(nn.Module):
+        def __init__(self, sinr_values):
+            super(WeightedMSELoss, self).__init__()
+            # Create the weights tensor by expanding it to match the shape of the targets (batch_size, 3)
+            self.weights = torch.exp(-torch.tensor(sinr_values, dtype=torch.float32)).unsqueeze(1)  # (batch_size, 1)
+            self.weights = self.weights.expand(-1, 3)  # Now (batch_size, 3) to match the prediction/target shape
+
+        def forward(self, predictions, targets):
+            # Calculate weighted MSE
+            loss = self.weights * (predictions - targets) ** 2
+            return loss.mean()  # Averaging over all elements
+
+    # Define loss and optimizer
+    # criterion = WeightedMSELoss(sinr_values)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # Training Loop
+    epochs = 1000
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        predictions = model(X_tensor)
+        loss = criterion(predictions, y_tensor)
+        loss.backward()
+        optimizer.step()
+        
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch}, Loss: {loss.item()}")
+
+ # Show results as figure
+    latitudes = dataset['gps.lat'].values
+    longitudes = dataset['gps.lon'].values
+
+    # Get model predictions
+    model.eval()  # Set model to evaluation mode
+    with torch.no_grad():
+        predicted_signal_quality = model(X_tensor).numpy()
+
+    # Separate predicted values for RSRP, RSRQ, and SINR
+    predicted_rsrp, predicted_rsrq, predicted_sinr = predicted_signal_quality[:, 0], predicted_signal_quality[:, 1], predicted_signal_quality[:, 2]
+
+    # Create side-by-side scatter plots (6 in total)
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10), sharex=True, sharey=True)
+
+    # Real vs Predicted Plots for RSRP, RSRQ, SINR
+    metrics = ["RSRP", "RSRQ", "SINR"]
+    true_values = [dataset['rsrp'].values, dataset['rsrq'].values, dataset['sinr'].values]
+    predicted_values = [predicted_rsrp, predicted_rsrq, predicted_sinr]
+
+    for i, metric in enumerate(metrics):
+        # True data
+        sc1 = axes[0, i].scatter(longitudes, latitudes, c=true_values[i], cmap='coolwarm', edgecolor='k', alpha=0.75)
+        axes[0, i].set_title(f"True {metric} Values")
+        fig.colorbar(sc1, ax=axes[0, i], label=metric)
+
+        # Predicted data
+        sc2 = axes[1, i].scatter(longitudes, latitudes, c=predicted_values[i], cmap='coolwarm', edgecolor='k', alpha=0.75)
+        axes[1, i].set_title(f"Predicted {metric} Values")
+        fig.colorbar(sc2, ax=axes[1, i], label=metric)
+
+    # Labels
+    for ax in axes.flat:
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
+
+    plt.tight_layout()
+    if show_res:
+        plt.show()
+
+    # Save output to CSV with both true and predicted values
+    output_df = pd.DataFrame({
+        'predicted_rsrp': predicted_rsrp,
+        'predicted_rsrq': predicted_rsrq,
+        'predicted_sinr': predicted_sinr,
+        'true_rsrp': true_values[0],
+        'true_rsrq': true_values[1],
+        'true_sinr': true_values[2]
+    })
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
+    filename = f"{file_name}_{timestamp}.csv"
+    output_df.to_csv(filename)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #old
+    # dataset = pd.read_csv(file_name)
+    # train = dataset[['gps.lat', 'gps.lon', 'altitudeAMSL']]
+    # print(train)
+
+    # # Feature engineering
+    # # Tower distance
+    # distances = compute_distance_to_tower(train, tower_location=tower_position)/1000
+    # train['distance_to_tower'] = distances
+    # # Tower direction
+    # azimuths, elevation_angle = compute_tower_direction(train, tower_location=tower_position)
+    # train['azimuth'] = azimuths # add az to input
+    # train['elevation_angle'] = elevation_angle # add e angle to input
+    # print(distances, azimuths, elevation_angle)
+
+    # # sinr_weighted_rssi = compute_sinr_weighted_rssi(data).values.reshape(-1, 1)
+    # print(distances, azimuths, elevation_angle)
+    # print(train.head(10))
+    # train.to_csv('NEW.csv', index=False) # log updated input as csv
+
+    # transformer
+
+
+
+
+
 
 
 
@@ -1047,6 +1341,11 @@ if __name__ == '__main__':
     ### Fig. 3. Example test-train split
     # _, _, _, _ = perform_splits(filename="CONF/cleaned_spiral.csv", this_test_size=0.3, this_n_clusters=10, this_test_fraction=0.3, visualise=True)
     
+    show_res=True
+    new_method("CONF/cleaned_rows.csv")
+    
+    new_method("CONF/cleaned_spiral2.csv")
+
     ### Fig. 4. Engineered feature - Distance to Tower, Bearing of Tower, SINR Weighting
     # rows_example_features  = pd.read_csv("CONF/cleaned_rows.csv")
     # spiral_example_features  = pd.read_csv("CONF/cleaned_spiral.csv")
@@ -1055,17 +1354,17 @@ if __name__ == '__main__':
     # plot_sinr_weighted_rssi(rows_example_features)
 
     ### Figure 5 & 6. Rows and Spiral Single-layer prediction
-    print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=1, epochs=5))
-    print("EVAL SEQ DONE")
-    print(evaluation_seq_2(file_name="CONF/cleaned_spiral.csv", runs=6, epochs=100))
-    print("EVAL SEQ DONE")
+    # print(evaluation_seq_2(file_name="CONF/cleaned_rows.csv", runs=1, epochs=5))
+    # print("EVAL SEQ DONE")
+    # print(evaluation_seq_2(file_name="CONF/cleaned_spiral.csv", runs=6, epochs=100))
+    # print("EVAL SEQ DONE")
     
 
-    ### Figure 7 & 8. RSSI layer-to-layer projection
-    df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=6, epochs=100) # train on 20m rows, predict 15m spiral, 50 runs over 200 epoch: 4hrs
-    print("EVAL SEQ DONE")
-    show_res = True
-    df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=6, epochs=100) #rain on 15m spiral, predict 20m rows
+    # ### Figure 7 & 8. RSSI layer-to-layer projection
+    # df_comparison = evaluate_cross_dataset("CONF/cleaned_rows.csv", "CONF/cleaned_spiral.csv", runs=6, epochs=100) # train on 20m rows, predict 15m spiral, 50 runs over 200 epoch: 4hrs
+    # print("EVAL SEQ DONE")
+    # show_res = True
+    # df_comparison = evaluate_cross_dataset("CONF/cleaned_spiral.csv", "CONF/cleaned_rows.csv", runs=6, epochs=100) #rain on 15m spiral, predict 20m rows
 
     
 

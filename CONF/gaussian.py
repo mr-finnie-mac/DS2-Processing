@@ -3,12 +3,15 @@ import pandas as pd
 from sklearn.cluster import DBSCAN
 from scipy.spatial.distance import pdist, squareform
 import config
-
+from transformer import compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+from sklearn.preprocessing import StandardScaler
+import matplotlib.patches as patches
+
 
 # for presenting splatts after flattening, revesres list to covariece matrix
 def preprocess_gaussian_data(data):
@@ -102,7 +105,7 @@ def plot_gaussian_splats(data, tower_location):
 
     plt.show()
 
-def adaptively_cluster_points(df, eps=0.1, min_samples=5):
+def adaptively_cluster_points(df, eps=0.00001, min_samples=5):
     """
     Use DBSCAN to cluster points adaptively based on spatial density.
     """
@@ -112,31 +115,146 @@ def adaptively_cluster_points(df, eps=0.1, min_samples=5):
     # print(f"CLUSTERS:{df['cluster']}")
     return df
 
+# def create_gaussians_for_clusters(df):
+#     """
+#     Generates Gaussian representations for each cluster separately.
+#     """
+#     gaussians = []
+#     for cluster_id in df['cluster'].unique():
+#         if cluster_id == -1: continue  # Ignore noise points
+#         cluster_data = df[df['cluster'] == cluster_id]
+#         gaussians.append(create_gaussian_representation(cluster_data))
+
+#     return pd.concat(gaussians, ignore_index=True) if gaussians else pd.DataFrame()
+
+def cluster_and_assign_means(df, eps=0.5, min_samples=5, fixed_dim=10):
+    """
+    Clusters points using DBSCAN and assigns each cluster its covariance representation.
+    """
+    df = df.copy()
+    coords = df[['localPosition.x', 'localPosition.y', 'localPosition.z']].values  # Spatial coordinates
+    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(coords)
+    df['cluster'] = clustering.labels_  # Assign cluster labels
+
+    return df
+
+def create_gaussians_for_clusters(df, fixed_dim=10):
+    """
+    Generates Gaussian representations (covariance vectors) for each cluster separately.
+    """
+    gaussians = []
+    for cluster_id in df['cluster'].unique():
+        if cluster_id == -1:
+            continue  # Ignore noise points
+        cluster_data = df[df['cluster'] == cluster_id]
+        cov_vector = compute_anisotropic_covariance(cluster_data, fixed_dim)
+        gaussians.append({'cluster': cluster_id, 'cov_vector': cov_vector})
+    
+    return pd.DataFrame(gaussians)
+# def cluster_and_assign_means(df, eps=0.5, min_samples=5):
+#     """
+#     Clusters points using DBSCAN and assigns each cluster its mean position.
+#     """
+#     df = df.copy()
+#     coords = df[['localPosition.x', 'localPosition.y', 'localPosition.z']].values  # Spatial coordinates
+#     clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(coords)
+#     df['cluster'] = clustering.labels_  # Assign cluster labels
+
+#     # Compute mean position per cluster
+#     cluster_means = df.groupby('cluster')[['gps.lat', 'gps.lon', 'altitudeAMSL']].mean()
+
+#     # Assign mean position back to each point in the cluster
+#     df = df.merge(cluster_means, on='cluster', suffixes=('', '_mean'))
+#     df[['gps.lat', 'gps.lon', 'altitudeAMSL']] = df[['gps.lat_mean', 'gps.lon_mean', 'altitudeAMSL_mean']]
+#     df.drop(columns=['gps.lat_mean', 'gps.lon_mean', 'altitudeAMSL_mean'], inplace=True)
+
+#     return df
+
+
+# def create_gaussians_for_clusters(df):
+#     """
+#     Generates Gaussian representations for each cluster separately.
+#     """
+#     gaussians = []
+#     for cluster_id in df['cluster'].unique():
+#         if cluster_id == -1: continue  # Ignore noise points
+#         cluster_data = df[df['cluster'] == cluster_id]
+#         gaussians.append(create_gaussian_representation(cluster_data))
+
+#     return pd.concat(gaussians, ignore_index=True) if gaussians else pd.DataFrame()
+
+
+
+import numpy as np
+
 def compute_anisotropic_covariance(data, fixed_dim=10):
-    """Computes anisotropic covariance and ensures fixed dimensionality."""
+    """Computes mean position and anisotropic covariance, then ensures fixed dimensionality."""
     
-    points = data[["gps.lat", "gps.lon", "altitudeAMSL"]].values
-    distances = squareform(pdist(points))  # Pairwise distances
+    # Extract relevant columns
+    pts = data[["gps.lat", "gps.lon", "altitudeAMSL"]].values
     
-    # Compute covariance (example: using exponential decay)
-    covariances = np.exp(-distances / np.max(distances))  
-
-    # Ensure all covariance matrices are same size (fixed_dim)
-    covariance_vectors = []
-    for row in covariances:
-        if len(row) > fixed_dim:
-            covariance_vectors.append(row[:fixed_dim])  # Truncate if too long
-        else:
-            covariance_vectors.append(np.pad(row, (0, fixed_dim - len(row)), mode='constant'))  # Pad if too short
+    # Compute mean position
+    mean_pos = np.mean(pts, axis=0)
     
-    return np.array(covariance_vectors)
+    # Compute 3x3 covariance matrix
+    cov_matrix = np.cov(pts, rowvar=False)
+    
+    # Flatten the covariance matrix to a 1D array
+    flat_cov = cov_matrix.flatten()
+    
+    # Combine mean position and flattened covariance into a single vector
+    combined_vector = np.concatenate((mean_pos, flat_cov))
+    
+    # Ensure the vector is of fixed_dim size
+    if len(combined_vector) < fixed_dim:
+        padded_vector = np.pad(combined_vector, (0, fixed_dim - len(combined_vector)), mode='constant')
+    else:
+        padded_vector = combined_vector[:fixed_dim]  # Truncate if necessary
+    
+    print(f"Mean Position: {mean_pos}")
+    print(f"cvariance Matrix:\n{cov_matrix}")
+    print(f"final vector fixed {fixed_dim}): {padded_vector}")
+    
+    return padded_vector
 
 
+
+
+def plot_clusters_with_gaussians(df):
+    """
+    Plots the mean position and covariance as Gaussian ellipses for each cluster.
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    for cluster_id in df['cluster'].unique():
+        if cluster_id == -1:
+            continue  # Ignore noise points
+        cluster_data = df[df['cluster'] == cluster_id]
+        mean_pos = np.mean(cluster_data[['gps.lat', 'gps.lon']], axis=0)
+        cov_matrix = np.cov(cluster_data[['gps.lat', 'gps.lon']].values, rowvar=False)
+        
+        # Eigen decomposition to get ellipse axes
+        eigvals, eigvecs = np.linalg.eigh(cov_matrix)
+        angle = np.degrees(np.arctan2(*eigvecs[:, 0][::-1]))
+        width, height = 2 * np.sqrt(eigvals)  # Scale for visualization
+        
+        # Plot mean position
+        ax.scatter(*mean_pos, label=f'Cluster {cluster_id}', s=50)
+        
+        # Plot covariance as an ellipse
+        ellipse = patches.Ellipse(mean_pos, width, height, angle, edgecolor='r', facecolor='none', lw=2)
+        ax.add_patch(ellipse)
+    
+    ax.set_xlabel("Latitude")
+    ax.set_ylabel("Longitude")
+    ax.legend()
+    plt.title("Cluster Mean Positions and Covariance Ellipses")
+    plt.show()
 
 
 def create_gaussian_representation(data):
     """
-    Creates Gaussian representation of input data with a single column storing covariance.
+    Creates Gaussian representation 
     
     Args:
         data: DataFrame with spatial and signal strength information.
@@ -163,6 +281,46 @@ def create_gaussian_representation(data):
 
 
 
+def new_generate_gaussian_features(data, tower_location=(52.60818, 1.542818, 15.2)):
+    """
+    Extracts Gaussian features and includes cluster IDs for transformer training.
+    """
+
+    feature_columns = ['gps.lat', 'gps.lon', 'altitudeAMSL', 
+                       'localPosition.x', 'localPosition.y', 'localPosition.z', 
+                       'rsrp', 'rsrq', 'rssi', 'sinr']
+    
+    spatial_signal_features = data[feature_columns].values
+    dist_to_tower = compute_distance_to_tower(data, tower_location).values.reshape(-1, 1)
+    azimuth, elevation = compute_tower_direction(data, tower_location)
+    sinr_weighted_rssi = compute_sinr_weighted_rssi(data).values.reshape(-1, 1)
+
+    azimuth = azimuth.values.reshape(-1, 1)
+    elevation = elevation.values.reshape(-1, 1)
+
+    if "covariance" in data.columns:
+        covariance_features = np.array([cov.flatten() for cov in data["covariance"].values])
+    else:
+        covariance_features = np.zeros((data.shape[0], 10))  # Placeholder if missing
+
+    scaler = StandardScaler()
+    covariance_features = scaler.fit_transform(covariance_features)
+
+    # Include cluster ID in final dataset
+    cluster_ids = data['cluster'].values.reshape(-1, 1)
+
+    features = np.hstack([
+        spatial_signal_features,
+        sinr_weighted_rssi,
+        dist_to_tower,
+        azimuth, elevation,
+        covariance_features,
+        cluster_ids  # Adding cluster ID to the input
+    ])
+
+    features = scaler.fit_transform(features)
+
+    return features
 
 
 

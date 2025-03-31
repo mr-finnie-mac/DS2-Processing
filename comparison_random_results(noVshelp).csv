@@ -1,0 +1,6 @@
+Method,Test Size,MAE
+Transformer(H-1.0),0.1,3.9563002988516565
+Transformer(H-1.0),0.2,3.8626425460958416
+Transformer(H-1.0),0.3,3.938658646630794
+Transformer(H-1.0),0.4,3.935240984282181
+Transformer(H-1.0),0.5,3.688761219601714

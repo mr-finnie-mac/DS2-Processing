@@ -15,6 +15,7 @@ def build_unet(input_shape=(64, 64, 3)):
         Compiled U-Net model.
     """
     inputs = Input(input_shape)
+    # print(f"UNET INPUT {inputs}")
 
     # Encoder
     c1 = Conv2D(64, (3, 3), padding='same')(inputs)
@@ -70,7 +71,7 @@ def build_unet(input_shape=(64, 64, 3)):
     # model.compile(optimizer='adam', loss=tf.keras.losses.Huber(), metrics=['mae'])
     model.compile(optimizer="adam", loss=tf.keras.losses.LogCosh(), metrics=["mae"]) # penalizes large prediction errors less aggressively than MSE, leading to more stable learning
     
-
+    model.save("unet_model.h5")
     
     return model
 
@@ -91,7 +92,7 @@ def preprocess_unet_data(df, grid_size=(64, 64)):
     """
     # Extract necessary fields
     points = df[['gps.lat', 'gps.lon']].values
-    values = df['rssi'].values
+    values = df['rsrp'].values
 
     # Generate grid
     grid_x, grid_y = np.mgrid[

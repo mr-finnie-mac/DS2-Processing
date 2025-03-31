@@ -21,6 +21,34 @@ def compute_distance_to_tower(data, tower_location):
 
 
 
+def compute_tower_direction_local(data, tower_xyz=(1.6, 1.3,-0.4)):
+    """
+    Computes azimuth and elevation angle from each point to the tower using local XYZ coordinates.
+
+    Args:
+        data (pd.DataFrame): DataFrame containing localPosition.x, localPosition.y, and localPosition.z.
+        tower_xyz (tuple): (x, y, z) coordinates of the tower.
+
+    Returns:
+        pd.Series, pd.Series: Azimuth (degrees), Elevation angle (degrees).
+    """
+    tower_x, tower_y, tower_z = tower_xyz
+    azimuths, elevations = [], []
+
+    for _, row in data.iterrows():
+        # Compute azimuth (bearing)
+        delta_x = row["localPosition.x"] - tower_x
+        delta_y = row["localPosition.y"] - tower_y
+        azimuth = np.degrees(np.arctan2(delta_y, delta_x)) % 360  # Normalize to 0-360 degrees
+        azimuths.append(azimuth)
+
+        # Compute elevation angle
+        delta_z = row["localPosition.z"] - tower_z  # Height difference
+        horizontal_distance = np.sqrt(delta_x**2 + delta_y**2)  # Ground distance
+        elevation_angle = np.degrees(np.arctan2(delta_z, horizontal_distance))  # Elevation angle
+        elevations.append(elevation_angle)
+
+    return pd.Series(azimuths, index=data.index), pd.Series(elevations, index=data.index)
 
 def compute_tower_direction(data, tower_location):
     """
@@ -28,7 +56,7 @@ def compute_tower_direction(data, tower_location):
 
     Args:
         data (pd.DataFrame): DataFrame containing GPS lat, lon, and altitudeAMSL.
-        tower_location (tuple): (lat, lon, altitudeAMSL) of the tower.
+        tower_location (tuple): (lat, lon, altitudeAMSL in meters) of the tower.
 
     Returns:
         pd.Series, pd.Series: Azimuth (degrees), Elevation angle (degrees).
@@ -46,12 +74,19 @@ def compute_tower_direction(data, tower_location):
         azimuth = np.degrees(np.arctan2(x, y)) % 360  # Normalize to 0-360 degrees
         azimuths.append(azimuth)
 
-        # Compute elevation angle
+        # Compute ground distance (meters)
         ground_distance = geodesic((row["gps.lat"], row["gps.lon"]), (tower_lat, tower_lon)).meters
-        altitude_diff = tower_alt - row["altitudeAMSL"]
+
+        # Ensure altitude is in meters (check if it's in cm)
+        drone_alt = row["altitudeAMSL"]
+        if drone_alt > 1000:  # If altitude is too large, assume cm and convert
+            drone_alt /= 100
+        
+        altitude_diff = drone_alt - tower_alt  # Height difference (meters)
+
+        # Compute elevation angle
         elevation_angle = np.degrees(np.arctan2(altitude_diff, ground_distance))
         elevations.append(elevation_angle)
-
 
     return pd.Series(azimuths, index=data.index), pd.Series(elevations, index=data.index)
 

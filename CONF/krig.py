@@ -2,6 +2,7 @@ from pykrige.ok import OrdinaryKriging
 from spatial_test_train_split import perform_splits
 import numpy as np
 import config
+import pickle
 
 def kriging_interpolation(train_df, test_df, position_cols, signal_col):
     """
@@ -59,6 +60,10 @@ def perform_Krig(this_filename = "placeholder.py", test_size = 0.2, test_fractio
     block_test_df = test_block.copy()  # Keep original test data for comparison
     # Example usage with RSRP signal
     block_test_df["kriging_predicted_rsrp"] = kriging_interpolation(train_block, test_block, position_cols[:2], signal_col)
+    
+    krig_data = random_test_df[["gps.lat", "gps.lon", "rsrp"]].copy()
 
+    with open("krig_data.pkl", "wb") as f:
+        pickle.dump(krig_data, f)
     # print(random_test_df[["rsrp", "kriging_predicted_rsrp"]])  # Compare actual vs. predicted
     return random_test_df, block_test_df

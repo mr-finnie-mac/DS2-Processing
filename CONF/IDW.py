@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from spatial_test_train_split import perform_splits
 import config
-
+import pickle
 def idw_interpolation(train_df, test_df, position_cols, signal_col, power=2, k=5):
     """
     Perform Inverse Distance Weighting (IDW) interpolation.
@@ -59,4 +59,9 @@ def perform_IDW(this_filename = "placeholder.py", test_size = 0.2, test_fraction
     block_test_df["idw_predicted_rsrp"] = idw_interpolation(train_block, test_block, position_cols, signal_col)
 
     # print(block_test_df[["rsrp", "idw_predicted_rsrp"]])  # Compare actual vs. predicted
+    # Save the known training points (lat, lon, rsrp)
+    idw_data = random_test_df[["gps.lat", "gps.lon", "rsrp"]].copy()
+
+    with open("idw_data.pkl", "wb") as f:
+        pickle.dump(idw_data, f)
     return random_test_df, block_test_df
