@@ -39,28 +39,28 @@ def idw_interpolation(train_df, test_df, position_cols, signal_col, power=2, k=5
     return interpolated_values
 
 
-def perform_IDW(this_filename = "placeholder.py", test_size = 0.2, test_fraction = 0.2, train_random=0, test_random=0, train_block=0, test_block=0):
+def perform_IDW(target = "rsrp", this_filename = "placeholder.py", test_size = 0.2, test_fraction = 0.2, train_random=0, test_random=0, train_block=0, test_block=0):
     # train_random, test_random, train_block, test_block = perform_splits(filename=this_filename,  this_test_size=test_size, this_n_clusters = 10, this_test_fraction = test_fraction)
 
     # RANDOM Example usage with RSRP signal
     position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
-    signal_col = "rsrp"  # Can change to 'rssi', 'sinr', etc.
+    signal_col = target # Can change to 'rssi', 'sinr', etc.
 
     random_test_df = test_random.copy()  # Keep original test data for comparison
-    random_test_df["idw_predicted_rsrp"] = idw_interpolation(train_random, test_random, position_cols, signal_col)
+    random_test_df["idw_predicted_"+target] = idw_interpolation(train_random, test_random, position_cols, signal_col)
     # print(random_test_df[["rsrp", "idw_predicted_rsrp"]])  # Compare actual vs. predicted
 
 
     # BLOCK Example usage with RSRP signal
     position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
-    signal_col = "rsrp"  # Can change to 'rssi', 'sinr', etc.
+    signal_col = target  # Can change to 'rssi', 'sinr', etc.
 
     block_test_df = test_block.copy()  # Keep original test data for comparison
-    block_test_df["idw_predicted_rsrp"] = idw_interpolation(train_block, test_block, position_cols, signal_col)
+    block_test_df["idw_predicted_"+target] = idw_interpolation(train_block, test_block, position_cols, signal_col)
 
     # print(block_test_df[["rsrp", "idw_predicted_rsrp"]])  # Compare actual vs. predicted
     # Save the known training points (lat, lon, rsrp)
-    idw_data = random_test_df[["gps.lat", "gps.lon", "rsrp"]].copy()
+    idw_data = random_test_df[["gps.lat", "gps.lon", target]].copy()
 
     with open("idw_data.pkl", "wb") as f:
         pickle.dump(idw_data, f)

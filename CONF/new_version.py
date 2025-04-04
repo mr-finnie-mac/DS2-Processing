@@ -11,6 +11,7 @@ from spatial_test_train_split import perform_splits
 from unet import preprocess_unet_data, build_unet, plot_unet_heatmap
 import matplotlib.pyplot as plt
 from keras.callbacks import EarlyStopping
+from keras.losses import Huber
 import sys
 from transformer import train_gaussian_transformer, evaluate_gaussian_transformer, generate_gaussian_features
 from gaussian import compute_anisotropic_covariance, plot_clusters_with_gaussians, cluster_and_assign_means, create_gaussians_for_clusters, adaptively_cluster_points, new_generate_gaussian_features, create_gaussian_representation, plot_gaussian_splats
@@ -21,8 +22,49 @@ import torch
 import torch.nn as nn
 from eval_baselines import *
 # import torch.optim as optim
+import joblib
 
-def new_method(file_name="placeholder", input_df = []):
+import torch
+import torch.nn as nn
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+
+# Positional Encoding Layer (Now Global)
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=1000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1), :].to(x.device)
+
+# Define Transformer Model (Now Global)
+class SignalQualityTransformer(nn.Module):
+    def __init__(self, input_dim, d_model=264, nhead=4, num_layers=2):
+        super(SignalQualityTransformer, self).__init__()
+        self.embedding = nn.Linear(input_dim, d_model)  # Embed features
+        self.pos_encoder = PositionalEncoding(d_model)  # Add position info
+        self.transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead),
+            num_layers=num_layers
+        )
+        self.fc = nn.Linear(d_model, 3)  # Output RSRP, RSRQ, SINR predictions
+
+    def forward(self, x):
+        x = self.embedding(x).unsqueeze(1)  # (batch_size, seq_len=1, d_model)
+        x = self.pos_encoder(x)  # Add positional encoding
+        x = self.transformer(x)  # Self-attention
+        x = self.fc(x.squeeze(1))  # (batch_size, 3)
+        return x
+
+def new_method(file_name="placeholder", input_df = [], model_name="x"):
     plt.rcParams.update({
             "font.family": "serif",
             "font.serif": ["Times New Roman"],
@@ -78,6 +120,8 @@ def new_method(file_name="placeholder", input_df = []):
     scaler = StandardScaler()
     X = scaler.fit_transform(train[features].values)
 
+    joblib.dump(scaler, f"{model_name}_scaler.pkl")  # ssave the actual StandardScaler instance
+
     # Convert to PyTorch tensors
     X_tensor = torch.tensor(X, dtype=torch.float32)
     y_tensor = torch.stack([
@@ -120,6 +164,7 @@ def new_method(file_name="placeholder", input_df = []):
             return x
 
     # Initialize Model
+    print(f"X TENSOR{len(features)}")
     model = SignalQualityTransformer(input_dim=len(features))
 
     # SINR-weighted Loss Function
@@ -151,8 +196,13 @@ def new_method(file_name="placeholder", input_df = []):
         
         if epoch % 10 == 0:
             print(f"Epoch {epoch}, Loss: {loss.item()}")
+            # During training, save the fitted scaler
+    
+    
 
-    torch.save(model.state_dict(), "transformer_model.pth")
+
+    torch.save(model.state_dict(), f"{model_name}_transformer_model.pth")
+
 
  # Show results as figure
     latitudes = dataset['gps.lat'].values
@@ -455,42 +505,677 @@ def plot_results(df, title):
 
         plt.show()
 
+import torch
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from keras.models import load_model
+from sklearn.metrics import mean_absolute_error
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
+def test_cross_pretrained(file_name="CONF/cleaned_spiral.csv", test_size = 0.5, random_state = 32, RBs = 63):
+    og_dataset = pd.read_csv("CONF/cleaned_rows.csv")
+    new_dataset = pd.read_csv(file_name)  
+    rsrps, rsrqs, sinrs, rssis = [], [], [], []  
+    test_size = test_size
+    
+    # og_dataset_train_df, bs_test_df = train_test_split(og_dataset, test_size=test_size, random_state=random_state)
+    new_dataset_train_df, new_dataset_test_df = train_test_split(new_dataset, test_size=test_size, random_state=random_state)
+
+    # IDW
+    for target, results_list in zip(["rsrp", "rsrq", "sinr"], [rsrps, rsrqs, sinrs]):
+        rand_mae, _, _, _ = do_IDW(size=test_size, target=target, this_train_random=og_dataset, this_test_random=new_dataset_train_df,
+                                   this_train_block=og_dataset, this_test_block=new_dataset_train_df)
+        results_list.append(["IDW", test_size, rand_mae])
+
+    # Kriging
+    for target, results_list in zip(["rsrp", "rsrq", "sinr"], [rsrps, rsrqs, sinrs]):
+        rand_mae, _, _, _ = do_Krig(size=test_size, target=target, this_train_random=og_dataset, this_test_random=new_dataset_train_df,
+                                    this_train_block=og_dataset, this_test_block=new_dataset_train_df)
+        results_list.append(["Krig", test_size, rand_mae])
+
+    # Ensemble Models
+    for target, results_list in zip(["rsrp", "rsrq", "sinr"], [rsrps, rsrqs, sinrs]):
+        rf_rand_mae, _, rf_block_mae, _, \
+        xg_rand_mae, _, xg_block_mae, _, \
+        lg_rand_mae, _, lg_block_mae, _, \
+        ens_rand_mae, _, ens_block_mae, _ = do_Ensemble(target=target, size=test_size,
+                                                        this_train_random=og_dataset, this_test_random=new_dataset_train_df,
+                                                        this_train_block=og_dataset, this_test_block=new_dataset_train_df)
+        results_list.append(["Ensemble", test_size, ens_rand_mae])
+
+    # Load Transformer Model
+    transformer_model = SignalQualityTransformer(input_dim=10)  # 10d input size
+    transformer_model.load_state_dict(torch.load("perim_transformer_model.pth", weights_only=True))
+
+    transformer_model.eval()  # Set to eval mode
+
+    # Feature Engineering
+    distances = compute_distance_to_tower(new_dataset_train_df, tower_location=tower_position) / 1000
+    new_dataset_train_df.loc[:, 'distance_to_tower'] = distances
+    _, elevation_angle = compute_tower_direction_local(new_dataset_train_df)
+    azimuths, _ = compute_tower_direction(new_dataset_train_df, tower_location=tower_position)
+    new_dataset_train_df.loc[:, 'azimuth'] = azimuths
+    new_dataset_train_df.loc[:, 'elevation_angle'] = elevation_angle
+
+    # Select features (MUST match training setup)
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 
+                'gps.lat', 'gps.lon', 'altitudeAMSL', 
+                'pressure', 'temperature', 'humidity', 'gas_resistance']
+
+    X_test = new_dataset_train_df[features].values
+
+    # Load the pre-trained scaler
+    scaler = joblib.load("perim_scaler.pkl")  # Load the scaler that was saved during training
+
+    assert isinstance(scaler, StandardScaler), "Loaded scaler is not a StandardScaler object!"
+    X_test_scaled = scaler.transform(X_test)  
+    # Transform the test data (DO NOT fit again!)
+    X_test_scaled = scaler.transform(X_test)  
+
+    # Convert to PyTorch tensor & add sequence dimension for Transformer
+    X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+
+
+    predictions = {}
+
+   
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    transformer_model.to(device)  # Move model to device
+    X_test_tensor = X_test_tensor.to(device)  # Move data to same device
+
+    # Transformer Model Predictions
+    with torch.no_grad():
+        transformer_preds = transformer_model(X_test_tensor).cpu().numpy()
+
+    # Convert predictions to NumPy & remove NaNs
+    # transformer_preds = transformer_preds.cpu().numpy()  # Move to CPU & convert to NumPy
+    transformer_preds = np.nan_to_num(transformer_preds, nan=0.0)  # Replace NaNs with 0
+
+    # Store in dictionary
+    predictions["Transformer"] = transformer_preds
+
+    # Convert to DataFrame
+    pred_df = pd.DataFrame(transformer_preds, columns=["rsrp_pred", "rsrq_pred", "sinr_pred"])
+    pred_df["method"] = "Transformer" 
+
+    # Compute Mean Absolute Error
+    y_true = new_dataset_train_df[['rsrp', 'rsrq', 'sinr']].values
+
+    for model_name, y_pred in predictions.items():
+        # Ensure y_pred is a NumPy array & remove NaNs
+        y_pred = np.nan_to_num(np.array(y_pred), nan=0.0)
+        
+        mae = mean_absolute_error(y_true, y_pred)
+        print(f"{model_name} MAE: {mae:.3f}")
+
+    # Append Transformer Results to Metrics
+    rsrps.append(["Transformer", test_size, mean_absolute_error(y_true[:, 0], transformer_preds[:, 0])])
+    rsrqs.append(["Transformer", test_size, mean_absolute_error(y_true[:, 1], transformer_preds[:, 1])])
+    sinrs.append(["Transformer", test_size, mean_absolute_error(y_true[:, 2], transformer_preds[:, 2])])
+
+    # Compute RSSI for all models
+    def compute_rssi(rsrp, rsrq, RBs=RBs):
+        return rsrp + 10 * np.log10(RBs) - rsrq  # Derived formula
+
+    for method, _, pred in rsrps:
+        if method != "Transformer":
+            rssi_pred = compute_rssi(pred, rsrqs[-1][2])
+            rssis.append([method, 1.0 - test_size, rssi_pred])
+
+    # Compute RSSI for Transformer predictions
+    rssi_transformer = compute_rssi(transformer_preds[:, 0], transformer_preds[:, 1])
+    rssis.append(["Transformer", test_size, np.mean(rssi_transformer)])
+
+    # Create DataFrame to store all results
+    results_df = pd.DataFrame(rsrps + rsrqs + sinrs + rssis, columns=["Method", "Test_Size", "MAE"])
+    
+    # Save results
+    results_df.to_csv("cross_ds_unseen.csv", index=False)
+
+    # # Plot the results
+    # plt.figure(figsize=(10, 6))
+    # for method in results_df["Method"].unique():
+    #     subset = results_df[results_df["Method"] == method]
+    #     plt.plot(subset["Test_Size"], subset["MAE"], marker="o", label=method)
+
+    # plt.xlabel("Test Size")
+    # plt.ylabel("Mean Absolute Error (MAE)")
+    # plt.title("Model Performance on Unseen Dataset")
+    # plt.legend()
+    # plt.grid()
+    # plt.show()
+
+    print("Results saved to cross_ds_unseen.csv")
+    return results_df
+
+
+def add_features(dataset):
+    # Feature Engineering
+    distances = compute_distance_to_tower(dataset, tower_location=tower_position) / 1000
+    dataset.loc[:, 'distance_to_tower'] = distances
+    _, elevation_angle = compute_tower_direction_local(dataset)
+    azimuths, _ = compute_tower_direction(dataset, tower_location=tower_position)
+    dataset.loc[:, 'azimuth'] = azimuths
+    dataset.loc[:, 'elevation_angle'] = elevation_angle
 
     
+    return dataset
+
+
+def plot_cross_all_props(file_path="per_prop.xlsx"):
+    # Load the Excel file
+    df = pd.read_excel(file_path)
+
+    # Define signal properties and corresponding columns
+    signals = {
+        "RSRP": ["RSRP Method", "RSRP Test_Size", "RSRP MAE"],
+        "RSRQ": ["RSRQ Method", "RSRQ Test_Size", "RSRQ MAE"],
+        "SINR": ["SINR Method", "SINR Test_Size", "SINR MAE"]
+    }
+
+    # Define markers and line styles for different methods
+    line_styles = {
+        "Ensemble": ("o", "-"),  # Circle marker, solid line
+        "IDW": ("s", "--"),  # Square marker, dashed line
+        "Krig": ("^", "-."),  # Triangle marker, dash-dot line
+        "Transformer": ("d", ":")  # Diamond marker, dotted line
+    }
+
+    # Apply font and style settings
+    plt.figure(figsize=(12, 8))
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman"],
+        "axes.labelsize": 18,
+        "legend.fontsize": 12,
+        "xtick.labelsize": 16,
+        "ytick.labelsize": 16,
+        "lines.linewidth": 3,
+        "lines.markersize": 10
+    })
+
+    for i, (signal, cols) in enumerate(signals.items(), 1):
+        plt.subplot(3, 1, i)  # Create a subplot for each signal
+        for method in df[cols[0]].unique():  # Unique methods (Ensemble, IDW, etc.)
+            subset = df[df[cols[0]] == method]
+            marker, linestyle = line_styles.get(method, ("o", "-"))  # Default if method not in dict
+            plt.plot(subset[cols[1]], subset[cols[2]], label=method, marker=marker, linestyle=linestyle)
+
+        plt.grid(True)
+
+        # Only show labels on the last subplot
+        if i == 3:
+            plt.xlabel("Test Size")
+            plt.ylabel("MAE")
+        else:
+            plt.xlabel("")
+            plt.ylabel("")
+
+    # Add legend only once (outside the plots)
+    plt.legend(loc="upper right", bbox_to_anchor=(1.1, 3.2), ncol=1)
+    
+    plt.tight_layout()
+    plt.show()
+
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# # Function to run the comparisons and collect results
+# def run_comparisons(dataset, cross_dataset, feature_list, target_column, random_states=[42, 7, 11, 22, 33, 44, 55, 66, 77, 88]):
+#     comparison_rsrp = []  # To store comparison results
+#     error_data_block = []  # To store block error data
+    
+#     # Initialize averages for each model
+#     avg_results = {
+#         'MLP': {'mae': [], 'rmse': []},
+#         'IDW': {'mae': [], 'rmse': []},
+#         'Kriging': {'mae': [], 'rmse': []},
+#         'Ensemble': {'mae': [], 'rmse': []}
+#     }
+#     cross_dataset
+#     # Split the datasets first
+#     X_cross_test = cross_dataset[feature_list].values
+#     Y_cross_test = cross_dataset[target_column].values
+    
+#     # Loop over different random states for repeated training and evaluation
+#     for rand_state in random_states:
+#         print(f"Running with random state: {rand_state}")
+#         test_size = 0.8
+
+#         # Split dataset into train and test sets
+#         train_x, test_set = train_test_split(dataset, test_size=test_size, random_state=rand_state)
+   
+#         # Features and target variable
+#         X_train = train_x[feature_list].values
+#         y_train = train_x[target_column].values
+#         X_test = test_set[feature_list].values
+#         y_test = test_set[target_column].values
+
+#         # --- MLP Model ---
+#         mlp_model = run_mlp(input_dim=len(feature_list), X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, epochs=1000)
+        
+#         test_mae, test_rmse = evaluate_mlp(model=mlp_model, X_test=X_test, y_test=y_test)
+#         cross_mae, cross_rmse = evaluate_mlp(model=mlp_model, X_test=X_cross_test, y_test=Y_cross_test)
+        
+#         # avg_results['MLP']['mae'].append(test_mae)
+#         # avg_results['MLP']['rmse'].append(test_rmse)
+#         avg_results['MLP']['mae'].append(cross_mae)
+#         avg_results['MLP']['rmse'].append(cross_rmse)
+        
+#         print(f"MLP - Test Set (Same Path): MAE {test_mae}, RMSE {test_rmse}")
+#         print(f"MLP - Cross-Test Set (Different Path): MAE {cross_mae}, RMSE {cross_rmse}")
+#         cross_dataset = cross_dataset[~cross_dataset.index.isin(train_x.index)]
+#         common_points = cross_dataset[cross_dataset.index.isin(train_x.index)]
+        
+        
+#         print(f"Number of test points also in train set: {len(common_points)} size of stipper {len(cross_dataset['gps.lat'].values)}")
+#         # --- IDW Model ---
+#         rand_mae, rand_rmse, block_mae, _ = do_IDW(target = "rssi", size=test_size, this_train_random=train_x, this_test_random=cross_dataset, this_train_block=train_x, this_test_block=test_set)
+#         comparison_rsrp.append(["IDW", test_size, rand_mae])
+#         error_data_block.append(["IDW", test_size, rand_rmse])
+        
+#         avg_results['IDW']['mae'].append(rand_mae)
+#         avg_results['IDW']['rmse'].append(rand_rmse)
+
+#         # --- Kriging Model ---
+#         rand_mae, rand_rmse, block_mae, _ = do_Krig(target = "rssi", size=test_size, this_train_random=train_x, this_test_random=cross_dataset, this_train_block=train_x, this_test_block=test_set)
+#         comparison_rsrp.append(["Kriging", test_size, rand_mae])
+#         error_data_block.append(["Kriging", test_size, rand_rmse])
+        
+#         avg_results['Kriging']['mae'].append(rand_mae)
+#         avg_results['Kriging']['rmse'].append(rand_rmse)
+        
+#         # --- Ensemble Model ---
+#         rf_rand_mae, _, rf_block_mae, _, \
+#         xg_rand_mae, _, xg_block_mae, _, \
+#         lg_rand_mae, _, lg_block_mae, _, \
+#         ens_rand_mae, ens_rand_rmse, ens_block_mae, _ = do_Ensemble(target = "rssi", size=test_size, this_train_random=train_x, this_test_random=cross_dataset, this_train_block=train_x, this_test_block=test_set)
+        
+#         comparison_rsrp.append(["Ensemble", test_size, ens_rand_mae])
+#         error_data_block.append(["Ensemble", test_size, ens_rand_rmse])
+        
+#         avg_results['Ensemble']['mae'].append(ens_rand_mae)
+#         avg_results['Ensemble']['rmse'].append(ens_block_mae)
+
+#     # After looping through all random states, calculate averages for each model
+#     for model, results in avg_results.items():
+#         avg_mae = np.mean(results['mae'])
+#         avg_rmse = np.mean(results['rmse'])
+#         print(f"\nAverage Results for {model}:")
+#         print(f"  Average MAE: {avg_mae:.4f}")
+#         print(f"  Average RMSE: {avg_rmse:.4f}")
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+def plot_3d_datasets(dataset1, dataset2):
+    """
+    Plot two datasets in 3D space (GPS Latitude, Longitude, Altitude).
+
+    Args:
+        dataset1: First dataset (plotted in RED).
+        dataset2: Second dataset (plotted in GREEN).
+    """
+
+    # Apply font and style settings
+    plt.figure(figsize=(12, 8))
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman"],
+        "axes.labelsize": 18,
+        "legend.fontsize": 12,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 3,
+        "lines.markersize": 10
+    })
+    fig = plt.figure(figsize=(10, 7))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Extract coordinates
+    lat1, lon1, alt1 = dataset1["gps.lat"], dataset1["gps.lon"], dataset1["altitudeAMSL"]
+    lat2, lon2, alt2 = dataset2["gps.lat"], dataset2["gps.lon"], dataset2["altitudeAMSL"]
+
+    # Plot datasets
+    ax.scatter(lat1, lon1, alt1, c='red', label="ROWS", alpha=0.6)
+    ax.scatter(lat2, lon2, alt2, c='green', label="SPRIRAL", alpha=0.6)
+
+    # Labels
+    ax.set_xlabel("Latitude")
+    ax.set_ylabel("Longitude")
+    ax.set_zlabel("Altitude (AMSL)")
+    ax.set_title("3D Spatial Plot of Two Datasets")
+    ax.legend()
+
+    plt.show()
+
+from sklearn.cluster import KMeans
+import numpy as np
+import pandas as pd
+def spatial_block_split(dataset, test_size=0.2, n_clusters=10):
+    """
+    Perform a spatially-aware train-test split by selecting a 'block' of nearby data points.
+
+    Args:
+        dataset: DataFrame containing 'gps.lat' and 'gps.lon' columns.
+        test_size: Fraction of data to use for testing.
+        n_clusters: Number of spatial clusters to form.
+
+    Returns:
+        train_set: DataFrame for training.
+        test_set: DataFrame for testing.
+    """
+    coords = dataset[['gps.lat', 'gps.lon']].values
+
+    # Perform KMeans clustering to group spatially close points
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    dataset['cluster'] = kmeans.fit_predict(coords)
+
+    # Find the largest cluster (or a random one)
+    largest_cluster = dataset['cluster'].value_counts().idxmax()  # Cluster with most points
+    test_set = dataset[dataset['cluster'] == largest_cluster]  # Use one cluster as test set
+
+    # Ensure test set size is close to the desired fraction
+    if len(test_set) > len(dataset) * test_size:
+        test_set = test_set.sample(frac=test_size, random_state=42)  # Subsample within cluster
+
+    # Remaining data is the train set
+    train_set = dataset.drop(test_set.index)
+
+    # Drop the temporary cluster column
+    train_set = train_set.drop(columns=['cluster'])
+    test_set = test_set.drop(columns=['cluster'])
+
+    return train_set, test_set
+
+def run_comparisons(dataset, cross_dataset, feature_list, target_column, random_states=[42, 7, 11, 22, 33, 44, 55, 66, 77, 88]):
+    """
+    Run model comparisons (MLP, IDW, Kriging, Ensemble) using consistent train/test splits.
+
+    Args:
+        dataset: Main dataset for training/testing.
+        cross_dataset: Secondary dataset for evaluating generalization.
+        feature_list: List of feature column names.
+        target_column: Target variable (e.g., signal strength).
+        random_states: List of random states for multiple runs.
+
+    Returns:
+        Prints the average results for each model.
+    """
+    plot_3d_datasets(dataset, cross_dataset)
+    # Store results
+    comparison_rsrp = []  # To store MAE results
+    error_data_block = []  # To store RMSE results
+    
+    # Initialize dictionary to store performance results
+    avg_results = {
+        'MLP': {'mae': [], 'rmse': []},
+        'IDW': {'mae': [], 'rmse': []},
+        'Kriging': {'mae': [], 'rmse': []},
+        'Ensemble': {'mae': [], 'rmse': []}
+    }
+    
+    # Extract cross-dataset features and targets
+    X_cross_test = cross_dataset[feature_list].values
+    Y_cross_test = cross_dataset[target_column].values
+
+    test_size = 0.8  # Fixed test size for all models
+
+    for rand_state in random_states:
+        print(f"\nRunning with random state: {rand_state}")
+
+        # ----- Train/Test Split -----
+        # train_set, test_set = train_test_split(dataset, test_size=test_size, random_state=rand_state)
+        train_set, test_set = spatial_block_split(dataset, test_size=test_size, n_clusters=4)
+        
+        # Features and target variable
+        X_train = train_set[feature_list].values
+        y_train = train_set[target_column].values
+        X_test = test_set[feature_list].values
+        y_test = test_set[target_column].values
+
+        # Remove overlap in cross_dataset to avoid data leakage
+        # cross_test_set = cross_dataset[~cross_dataset.index.isin(train_set.index)]
+        # common_points = cross_dataset[cross_dataset.index.isin(train_set.index)]
+        # print(f"Number of test points also in train set: {len(common_points)}")
+
+        # -----  MLP Model -----
+        mlp_model = run_mlp(input_dim=len(feature_list), X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, epochs=1000)
+        # plot_3d_datasets(train_set, test_set)
+        test_mae, test_rmse = evaluate_mlp(model=mlp_model, X_test=X_test, y_test=y_test)
+        cross_mae, cross_rmse = evaluate_mlp(model=mlp_model, X_test=X_cross_test, y_test=Y_cross_test)
+
+        avg_results['MLP']['mae'].append(cross_mae)
+        avg_results['MLP']['rmse'].append(cross_rmse)
+
+        print(f"MLP - Test Set (Same Path): MAE {test_mae:.4f}, RMSE {test_rmse:.4f}")
+        print(f"MLP - Cross-Test Set (Different Path): MAE {cross_mae:.4f}, RMSE {cross_rmse:.4f}")
+
+        # plot_3d_datasets(train_set, test_set)
+        # ----- IDW Model -----
+        rand_mae, rand_rmse, block_mae, _ = do_IDW(
+            target=target_column, size=test_size, 
+            this_train_random=train_set, this_test_random=test_set,
+            this_train_block=train_set, this_test_block=test_set
+        )
+        avg_results['IDW']['mae'].append(rand_mae)
+        avg_results['IDW']['rmse'].append(rand_rmse)
+
+        # ----- Kriging Model -----
+        rand_mae, rand_rmse, block_mae, _ = do_Krig(
+            target=target_column, size=test_size, 
+            this_train_random=train_set, this_test_random=test_set,
+            this_train_block=train_set, this_test_block=test_set
+        )
+        avg_results['Kriging']['mae'].append(rand_mae)
+        avg_results['Kriging']['rmse'].append(rand_rmse)
+
+        # ----- Ensemble Model -----
+        rf_rand_mae, _, rf_block_mae, _, \
+        xg_rand_mae, _, xg_block_mae, _, \
+        lg_rand_mae, _, lg_block_mae, _, \
+        ens_rand_mae, ens_rand_rmse, ens_block_mae, _ = do_Ensemble(
+            target=target_column, size=test_size, 
+            this_train_random=train_set, this_test_random=test_set,
+            this_train_block=train_set, this_test_block=test_set
+        )
+        avg_results['Ensemble']['mae'].append(ens_rand_mae)
+        avg_results['Ensemble']['rmse'].append(ens_rand_rmse)
+
+    # ----- Compute Averages -----
+    print("\nFinal Average Results:")
+    for model, results in avg_results.items():
+        avg_mae = np.mean(results['mae'])
+        avg_rmse = np.mean(results['rmse'])
+        print(f"\n{model}:")
+        print(f"  - Average MAE: {avg_mae:.4f}")
+        print(f"  - Average RMSE: {avg_rmse:.4f}")
+
+
+
+from keras_tuner import RandomSearch
 
 if __name__ == '__main__':
-    show_res = False
-    # --- Run the Function ---
-    # saved_results = pd.read_csv("comparison_random_results.csv")
-    # plot_results(saved_results, "Single Layer Performance")
+
+    # Example usage:
     file_name = "CONF/cleaned_rows.csv"
+    file_name2 = "CONF/cleaned_spiral.csv"
 
-    # results_df = compare_all_methods(file_name=file_name)
-    # run on baseline 
-    # dataset = pd.read_csv(file_name)
-    # plot_results(results_df, "Single Layer Performance")
-    
-    # print("DONE!!!!!!!!!")
-    
-    # print("KRIG")
-    # krig_df = do_Krig(df=dataset)
-    # print("ENS")
-    # ens_df = do_Ensemble(df=dataset)
-    # print("TRA")
-
-    # run on transformer method
     dataset = pd.read_csv(file_name)
+    cross_dataset = pd.read_csv(file_name2)
+
+    # Add features to datasets (e.g., distance_to_tower, azimuth, etc.)
+    dataset = add_features(dataset)
+    cross_dataset = add_features(cross_dataset)
+
+    # Define features and target
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL']
+    target = 'rssi'
+
+    # Run the comparison loop with random states
+    run_comparisons(dataset, cross_dataset, features, target)
+
+    tuner = RandomSearch(
+        build_mlp_tuner,
+        objective='val_loss',  # Optimize for lowest validation loss
+        max_trials=10,  # Try 10 different hyperparameter sets
+        executions_per_trial=2,  # Average over 2 runs per set
+        directory='mlp_tuning',  # Folder to store results
+        project_name='signal_prediction'
+    )
+
+    # Load datasets
+    file_name = "CONF/cleaned_rows.csv"  # First dataset (e.g., straight-line path)
+    file_name2 = "CONF/cleaned_spiral.csv"  # Second dataset (spiral path)
+
+
+    dataset = pd.read_csv(file_name)  # Load first dataset
+    cross_dataset = pd.read_csv(file_name2)  # Load second dataset (unseen locations)
+
+    dataset = add_features(dataset)
+    cross_dataset = add_features(cross_dataset)
     
+    # Select features (MUST match training setup)
+    # features = ['distance_to_tower', 'azimuth', 'elevation_angle', 
+    #             'gps.lat', 'gps.lon', 'altitudeAMSL']
+
+    # Split first dataset into train and test sets (ensuring test data is from same dataset)
+    train_set, test_set = train_test_split(dataset, test_size=0.3, random_state=42)
+
+    # Features and target variable
+    # features = ['gps.lat', 'gps.lon', 'altitudeAMSL']
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', # add in tower feats
+                'gps.lat', 'gps.lon', 'altitudeAMSL']
+    target = 'rssi'
+
+    # Train data (from first dataset)
+    X_train = train_set[features].values
+    y_train = train_set[target].values
+
+    # Test data (from first dataset)
+    X_test = test_set[features].values
+    y_test = test_set[target].values
+    tuning = False
+    if tuning:
+        tuner.search(X_train, y_train, epochs=50, validation_data=(X_test, y_test), batch_size=64)
+        best_hps = tuner.get_best_hyperparameters(num_trials=5)[0]
+
+        print(f"""
+        Best Hyperparameters:
+        - Number of Layers: {best_hps.get('num_layers')}
+        - Neurons per Layer: {best_hps.get('num_neurons')}
+        - Dropout Rate: {best_hps.get('dropout_rate')}
+        - Learning Rate: {best_hps.get('learning_rate')}
+        """)
+        # Best Hyperparameters for MSE LOSS:
+        # - Number of Layers: 2
+        # - Neurons per Layer: 256
+        # - Dropout Rate: 0.5
+        # - Learning Rate: 0.01
+
+
+    
+    #  Set seeds for reproducibility
+    import tensorflow as tf
+    import numpy as np
+    import random
+    import os
+    seed = 42
+    np.random.seed(seed)
+    random.seed(seed)
+    tf.random.set_seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
+    # Completely unseen test data (from second dataset)
+    cross_X_test = cross_dataset[features].values
+    cross_Y_test = cross_dataset[target].values
+
+    runs =[1,2,3,4,5,6,7,8,9,10]
+    same_avg_mae = []
+    same_avg_rsme = []
+    cross_avg_mae = []
+    cross_avg_rsme = []
+    # for run in runs:
+
+    # Train the model on dataset1
+    mlp_model = run_mlp(input_dim=len(features), X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, epochs=1000)
+
+    # Evaluate on test set from dataset1
+    test_mae, test_rmse = evaluate_mlp(model=mlp_model, X_test=X_test, y_test=y_test)
+    print(f"Test Set (Same Path): MAE {test_mae}, RMSE {test_rmse}")
+    # same_avg_mae.append(test_mae)
+    # same_avg_rsme.append(test_rmse)
+
+    # Evaluate on completely unseen test set (dataset2, different path)
+    cross_mae, cross_rmse = evaluate_mlp(model=mlp_model, X_test=cross_X_test, y_test=cross_Y_test)
+    print(f"Cross-Test Set (Different Path): MAE {cross_mae}, RMSE {cross_rmse}")
+    # cross_avg_mae.append(test_mae)
+    # cross_avg_rsme.append(test_rmse)
+
+    # print(f"Same layer {same_avg_mae, same_avg_rsme}, Cross layer {cross_avg_mae, cross_avg_mae}")
+
+        # # new_method(input_df=pd.read_csv(file_name3), model_name="perim")
+
+    # # plot_cross_all_props()
+
+    # show_res = False
+    # # --- Run the Function ---
+    # # saved_results = pd.read_csv("comparison_random_results.csv")
+    # # plot_results(saved_results, "Single Layer Performance")
+    # file_name = "CONF/cleaned_rows.csv"
+    # file_name2 = "CONF/cleaned_spiral.csv"
+    # ts = [0.1, 0.2, 0.3, 0.4, 0.5]
+    # cross_ress = []
+    # for t in ts:
+    #     res = test_cross_pretrained(file_name=file_name2, test_size=t)
+    #     res.to_csv(f"compiled_cross_ds_unseen({t}).csv")
+
+
+
+  
+
+    # # results_df = compare_all_methods(file_name=file_name)
+    # # run on baseline 
+    # # dataset = pd.read_csv(file_name)
+    # # plot_results(results_df, "Single Layer Performance")
+    
+    # # print("DONE!!!!!!!!!")
+    
+    # # print("KRIG")
+    # # krig_df = do_Krig(df=dataset)
+    # # print("ENS")
+    # # ens_df = do_Ensemble(df=dataset)
+    # # print("TRA")
+
+    # # run on transformer method
+    dataset = pd.read_csv(file_name)
+    dataset2 = pd.read_csv(file_name2)
+    # # cross_df = pd.concat([dataset, dataset2], axis=0)
+    # test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
+    # for test_size in test_sizes:
+    #     train_df, test_df = train_test_split(dataset2, test_size=test_size, random_state=42)
+    #     cross_df = pd.concat([dataset, test_df], axis=0)
+
+
+
+    
+    # new_method(input_df=dataset)
+
+    new_method()
+
     comparison_rsrp = []
     error_data_block = []
     trans_perfs = []
     test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
     helpers_percentage = 1.0
-    runs = 1
+    runs = 5
     for run in range(runs):    
-        print(f"Run {run}")
         for test_size in test_sizes:
-            print(f"Test size {test_size}")
+            print(f"Run {run} - Test size {test_size}")
             if len(rand_states) < 2:
                 raise ValueError("rand_states must contain at least two values (current + next states).")
 
@@ -502,8 +1187,19 @@ if __name__ == '__main__':
             next_index = (current_index + 1) % (len(rand_states) - 1)
             rand_states[0] = next_index  # Update index in config
 
-            train_df, test_df = train_test_split(dataset, test_size=test_size, random_state=random_state)
+
+            # # uncomment for cross layer
+            train_df, test_df = train_test_split(dataset2, test_size=test_size, random_state=random_state)
+            cross_df = pd.concat([dataset, test_df], axis=0)
+
+            # test_df = train_df
+            # train_df = cross_df
+
+            # # uncomment for 1 layer
+            # train_df, test_df = train_test_split(dataset, test_size=test_size, random_state=random_state)
             # trans_df = configure_for_transformer(train_df=train_df, test_df=test_df)
+
+
             # print(len(dataset), len(trans_df))
             # help
             # train_helpers, test_helpers, train_pure_spatial, test_pure_spatial = create_train_test_splits_helpers(dataset, test_size=test_size)
@@ -526,11 +1222,14 @@ if __name__ == '__main__':
             ens_rand_mae, _, ens_block_mae, _ = do_Ensemble(test_size, train_df, test_df, train_df, test_df)
             comparison_rsrp.append(["Ensemble", test_size, ens_rand_mae])
 
-            # UNET
-            unet_model = train_unet(train_df, epochs = 100) #random spli
-            unet_rand_mae, _ = evaluate_unet(unet_model, test_df)  # Evaluate on random test set
+            # mlp
+            
+            mlp_model = train_mlp(train_df) #random split
+            unet_rand_mae, _ = evaluate_unet(mlp_model, test_df)  # Evaluate on random test set
 
-            comparison_rsrp.append(["U-Net", test_size, unet_rand_mae])
+            
+
+            # comparison_rsrp.append(["U-Net", test_size, unet_rand_mae])
 
 
 
@@ -543,7 +1242,9 @@ if __name__ == '__main__':
             
 
             trans_perfs.append([test_size, res_mae_rsrp, res_mae_rsrq, res_mae_sinr])
-        # print(f"MAE RSRP - {res_mae_rsrp}")
+
+        
+        print(f"MAE RSRP - {res_mae_rsrp}")
 
         # # with help
         # res = new_method(input_df=train_helpers)
@@ -554,94 +1255,6 @@ if __name__ == '__main__':
 
     
     comparison_rsrp = pd.DataFrame(comparison_rsrp, columns=["Method", "Test Size", "MAE"])
-    comparison_rsrp.to_csv('comparison-rsrp.csv', index=False)
+    comparison_rsrp.to_csv('latest-cross-comparison-rsrp.csv', index=False)
     trans_perfs = pd.DataFrame(trans_perfs, columns=["Test Size", "RSRP-MAE", "RSRQ-MAE", "SINR-MAE"])
-    trans_perfs.to_csv('trans-sigs.csv', index=False)
-
-# # Example function for loading models
-# def load_pytorch_model(model_class, model_path):
-#     model = model_class(input_dim=10)  # Make sure input_dim is the same as during training
-#     model.load_state_dict(torch.load(model_path))
-#     model.eval()  # Set to eval mode
-#     return model
-
-# def load_keras_model(model_path):
-#     return load_model(model_path)
-
-# # Example for data preprocessing (you can adjust based on your needs)
-# def preprocess_new_data(df, feature_columns, scaler=None):
-#     features = df[feature_columns]
-    
-#     if scaler:
-#         features = scaler.transform(features)
-#     else:
-#         scaler = StandardScaler()
-#         features = scaler.fit_transform(features)
-    
-#     return torch.tensor(features, dtype=torch.float32), scaler
-
-# # Model evaluation function
-# def evaluate_model(model, X_new, y_true, model_type='pytorch'):
-#     if model_type == 'pytorch':
-#         with torch.no_grad():
-#             y_pred = model(X_new).numpy()
-#     elif model_type == 'keras':
-#         y_pred = model.predict(X_new)
-    
-#     mse = mean_squared_error(y_true, y_pred)
-#     mae = mean_absolute_error(y_true, y_pred)
-    
-#     return mse, mae
-
-
-
-# # Load all models (adjust paths accordingly)
-# models = {
-#     'unet': load_keras_model('unet_model.h5'),  # If using Keras for U-Net
-#     'transformer': load_pytorch_model(SignalQualityTransformer, 'transformer_model.pth'),
-#     # Add other models as needed (IDW, RIGGING, Ensemble)
-# }
-
-# # Load new dataset layer (e.g., 20m altitude dataset)
-# new_data = pd.read_csv('new_dataset_20m.csv')
-
-# # Feature engineering
-# # Tower distance
-# distances = compute_distance_to_tower(new_data, tower_location=tower_position)/1000
-# # train['distance_to_tower'] = distances
-# new_data.loc[:, 'distance_to_tower'] = distances
-# # Tower direction
-# _, elevation_angle = compute_tower_direction_local(new_data)
-# azimuths,_ = compute_tower_direction(new_data, tower_location=tower_position)
-# # train['azimuth'] = azimuths # add az to input
-# new_data.loc[:, 'azimuth'] = azimuths
-# # train['elevation_angle'] = elevation_angle # add e angle to input
-# new_data.loc[:, 'elevation_angle'] = elevation_angle
-# print(distances, azimuths, elevation_angle)
-
-# # Assuming you have a list of feature columns and target columns
-# feature_columns = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL', 'pressure', 'temperature', 'humidity', 'gas_resistance']  # Adjust as per your data
-# target_columns = ['rsrp', 'rsrq', 'rssi', 'sinr']
-
-# # Separate features and targets from the new dataset
-# X_new = new_data[feature_columns]
-# y_true = new_data[target_columns]
-
-# # Preprocess data for both PyTorch and Keras models
-# X_new_tensor, scaler = preprocess_new_data(X_new, feature_columns)
-
-# # Evaluate all models
-# for model_name, model in models.items():
-#     if model_name == 'transformer':
-#         mse, mae = evaluate_model(model, X_new_tensor, y_true.values, model_type='pytorch')
-#     else:
-#         mse, mae = evaluate_model(model, X_new, y_true.values, model_type='keras')
-    
-#     print(f"{model_name} Model - MSE: {mse}, MAE: {mae}")
-
-
-    
-    # error_data_block.append(["IDW", test_size, block_mae])
-    # create_train_test_splits_helpers(dataset)
-    # new_method("CONF/cleaned_rows.csv")
-    # new_method("CONF/cleaned_spiral2.csv")
+    trans_perfs.to_csv('latest-cross-trans-sigs.csv', index=False)

@@ -91,26 +91,26 @@ def preprocess_unet_data(df, grid_size=(64, 64)):
         X (input grid), Y (target signal strength grid)
     """
     # Extract necessary fields
-    points = df[['gps.lat', 'gps.lon']].values
-    values = df['rsrp'].values
+    points = df[['gps.lat', 'gps.lon', 'altitudeAMSL']].values
+    values = df['rssi'].values
 
-    # Generate grid
-    grid_x, grid_y = np.mgrid[
-        df['gps.lat'].min():df['gps.lat'].max():grid_size[0]*1j,
-        df['gps.lon'].min():df['gps.lon'].max():grid_size[1]*1j
-    ]
+    # # Generate grid
+    # grid_x, grid_y = np.mgrid[
+    #     df['gps.lat'].min():df['gps.lat'].max():grid_size[0]*1j,
+    #     df['gps.lon'].min():df['gps.lon'].max():grid_size[1]*1j
+    # ]
 
     # Interpolate signal strength values onto grid
-    grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
+    # grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
 
     # Normalize
-    grid_z = np.nan_to_num(grid_z)  # Handle NaNs
+    # grid_z = np.nan_to_num(grid_z)  # Handle NaNs
 
     # Reshape for CNN input
-    X = np.stack([grid_x, grid_y, grid_z], axis=-1)  # 3 channels: lat, lon, signal strength
-    X = np.expand_dims(X, axis=0)  # Add batch dimension
+    # X = np.stack([grid_x, grid_y, grid_z], axis=-1)  # 3 channels: lat, lon, signal strength
+    # X = np.expand_dims(X, axis=0)  # Add batch dimension
 
-    return X, grid_z
+    return points, values
 
 import numpy as np
 import matplotlib.pyplot as plt

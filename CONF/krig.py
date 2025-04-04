@@ -40,26 +40,26 @@ def kriging_interpolation(train_df, test_df, position_cols, signal_col):
 
     return interpolated_values
 
-def perform_Krig(this_filename = "placeholder.py", test_size = 0.2, test_fraction = 0.2, train_random=0, test_random=0, train_block=0, test_block=0):
+def perform_Krig(target = "rsrp", this_filename = "placeholder.py", test_size = 0.2, test_fraction = 0.2, train_random=0, test_random=0, train_block=0, test_block=0):
     # train_random, test_random, train_block, test_block = perform_splits(filename=this_filename,  this_test_size=test_size, this_n_clusters = 10, this_test_fraction = test_fraction)
 
     # rsrp example
     position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
-    signal_col = "rsrp"  # Can change to 'rssi', 'sinr', etc.
+    signal_col = target  # Can change to 'rssi', 'sinr', etc.
 
     random_test_df = test_random.copy()  # Keep original test data for comparison
     # Example usage with RSRP signal
-    random_test_df["kriging_predicted_rsrp"] = kriging_interpolation(train_random, test_random, position_cols[:2], signal_col)
+    random_test_df["kriging_predicted_"+target] = kriging_interpolation(train_random, test_random, position_cols[:2], signal_col)
 
     # print(test_df[["rsrp", "kriging_predicted_rsrp"]])  # Compare actual vs. predicted
 
     # rsrp example
     position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
-    signal_col = "rsrp"  # Can change to 'rssi', 'sinr', etc.
+    signal_col = target  # Can change to 'rssi', 'sinr', etc.
 
     block_test_df = test_block.copy()  # Keep original test data for comparison
     # Example usage with RSRP signal
-    block_test_df["kriging_predicted_rsrp"] = kriging_interpolation(train_block, test_block, position_cols[:2], signal_col)
+    block_test_df["kriging_predicted_"+target] = kriging_interpolation(train_block, test_block, position_cols[:2], signal_col)
     
     krig_data = random_test_df[["gps.lat", "gps.lon", "rsrp"]].copy()
 

@@ -17,6 +17,7 @@ from gaussian import compute_anisotropic_covariance, plot_clusters_with_gaussian
 from feature_engineering import compute_tower_direction_local, compute_distance_to_tower, compute_tower_direction, compute_sinr_weighted_rssi, plot_flightpath_with_arrows, plot_flightpath_with_distances, plot_sinr_weighted_rssi, plot_flightpath_with_diamonds, plot_flightpath_combined
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
+from mlp import *
 # 52.60818, 1.542818, altitudeAMSL: 15.2
 title_s = 18
 label_s = 16
@@ -61,11 +62,11 @@ def evaluate_predictions(y_true, y_pred):
 # mae = random_idw_metrics["MAE"]
 # print(mae)
 
-def do_IDW(size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder"):
+def do_IDW(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder"):
     # Evaluate IDW
-    random_test_df, block_test_df = perform_IDW(this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
-    random_idw_metrics = evaluate_predictions(random_test_df["rsrp"], random_test_df["idw_predicted_rsrp"])
-    block_idw_metrics = evaluate_predictions(block_test_df["rsrp"], block_test_df["idw_predicted_rsrp"])
+    random_test_df, block_test_df = perform_IDW(target=target, this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
+    random_idw_metrics = evaluate_predictions(random_test_df[target], random_test_df["idw_predicted_"+target])
+    block_idw_metrics = evaluate_predictions(block_test_df[target], block_test_df["idw_predicted_"+target])
     print("Random IDW Performance:", random_test_df)
     print("Block IDW Performance:", block_test_df)
     random_mae = random_idw_metrics["MAE"]
@@ -76,11 +77,11 @@ def do_IDW(size, this_train_random=0, this_test_random=0, this_train_block=0, th
     return random_mae, random_rmse, block_mae, block_rmse
 
 
-def do_Krig(size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder"):
+def do_Krig(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder"):
     # Evaluate IDW
-    random_test_df, block_test_df = perform_Krig(this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
-    random_kriging_metrics = evaluate_predictions(random_test_df["rsrp"], random_test_df["kriging_predicted_rsrp"])
-    block_kriging_metrics = evaluate_predictions(block_test_df["rsrp"], block_test_df["kriging_predicted_rsrp"])
+    random_test_df, block_test_df = perform_Krig(target=target, this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
+    random_kriging_metrics = evaluate_predictions(random_test_df[target], random_test_df["kriging_predicted_"+target])
+    block_kriging_metrics = evaluate_predictions(block_test_df[target], block_test_df["kriging_predicted_"+target])
     print("Random IDW Performance:", random_test_df)
     print("Block IDW Performance:", block_test_df)
     random_mae = random_kriging_metrics["MAE"]
@@ -90,8 +91,8 @@ def do_Krig(size, this_train_random=0, this_test_random=0, this_train_block=0, t
 
     return random_mae, random_rmse, block_mae, block_rmse
 
-def do_Ensemble(size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0):
-    random_ensemble, block_ensemble = perform_ensemble(size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
+def do_Ensemble(target = "rsrp", size=0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0):
+    random_ensemble, block_ensemble = perform_ensemble(target=target, size=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
     # Print results
     # RF
     # Access Random Forest results from the nested dictionary
@@ -144,7 +145,7 @@ def do_Ensemble(size, this_train_random=0, this_test_random=0, this_train_block=
 #     model.fit(X_train, np.expand_dims(Y_train, axis=0), epochs=epochs, verbose=1)
     
 #     return model
-def train_unet(train_df, epochs=20):
+def train_unet(train_df, epochs=1000):
     """
     Train the improved U-Net model.
     
@@ -171,6 +172,33 @@ def train_unet(train_df, epochs=20):
 
     return model
 
+def train_mlp(train_df, X_train, Y_train, epochs=1000):
+    """
+    Train the improved U-Net model.
+    
+    Args:
+        train_df: DataFrame containing training data.
+        epochs: Number of epochs to train.
+    
+    Returns:
+        Trained U-Net model.
+    """
+    # Normalize signal strength to range [-1, 1]
+    # train_df["rssi"] = (train_df["rssi"] - train_df["rssi"].mean()) / train_df["rssi"].std()
+    
+
+    # X_train, Y_train = preprocess_unet_data(train_df)
+    
+    model = build_mlp(input_shape=(6,))
+
+    # Early stopping to avoid overfitting
+    early_stopping = EarlyStopping(monitor='loss', patience=15, restore_best_weights=True)
+
+    model.fit(X_train, np.expand_dims(Y_train, axis=0), 
+              epochs=epochs, verbose=1, callbacks=[early_stopping])
+
+    return model
+
 def evaluate_unet(model, test_df):
     """
     Evaluate the improved U-Net model on test data.
@@ -182,16 +210,33 @@ def evaluate_unet(model, test_df):
     Returns:
         MAE and RMSE.
     """
-    test_df["rssi"] = (test_df["rssi"] - test_df["rssi"].mean()) / test_df["rssi"].std()
+    # test_df["rssi"] = (test_df["rssi"] - test_df["rssi"].mean()) / test_df["rssi"].std()
     X_test, Y_test = preprocess_unet_data(test_df)
     predictions = model.predict(X_test)[0, :, :, 0]  # Extract 2D output
 
-    mae = np.mean(np.abs(Y_test - predictions))
+    mse = np.mean(np.abs((Y_test - predictions) ** 2))
     rmse = np.sqrt(np.mean((Y_test - predictions) ** 2))
 
+    return mse, rmse
+
+def evaluate_mlp(model, X_test, y_test):
+    """
+    Evaluate the trained MLP model on test data.
+    
+    Args:
+        model: Trained MLP model.
+        X_test: Test input data (features).
+        y_test: Ground truth signal strength values.
+    
+    Returns:
+        MAE and RMSE.
+    """
+    predictions = model.predict(X_test).flatten()  # Ensure predictions are 1D
+    
+    mae = mean_absolute_error(y_test, predictions)
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+
     return mae, rmse
-
-
 # def do_splatformer(test_size, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, epochs=20):
 #     """
 #     Executes the Gaussian Splatting + Transformer method on the dataset.

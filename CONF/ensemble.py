@@ -82,7 +82,7 @@ def train_and_evaluate(train_df, test_df, target_col="rsrp", position_cols=0):
 # results_random = train_and_evaluate(train_random, test_random)
 # results_block = train_and_evaluate(train_block, test_block)
 
-def perform_ensemble(size=0.2, train_random=0, test_random=0, train_block=0, test_block=0):
+def perform_ensemble(target = "rsrp", size=0.2, train_random=0, test_random=0, train_block=0, test_block=0):
     # Load and split dataset using spatial methods
     # train_random, test_random, train_block, test_block = perform_splits(filename="CONF/cleaned_spiral.csv", this_test_size=size)
 
@@ -91,8 +91,8 @@ def perform_ensemble(size=0.2, train_random=0, test_random=0, train_block=0, tes
     signal_cols = ["rsrq", "rsrp", "rssi", "sinr"]
 
     # Evaluate on both random and block-based splits
-    results_random = train_and_evaluate(train_random, test_random, target_col="rssi", position_cols=position_cols)
-    results_block = train_and_evaluate(train_block, test_block, target_col="rssi", position_cols=position_cols)
+    results_random = train_and_evaluate(train_random, test_random, target_col=target, position_cols=position_cols)
+    results_block = train_and_evaluate(train_block, test_block, target_col=target, position_cols=position_cols)
 
     return results_random, results_block
 
