@@ -1,5 +1,5 @@
 from config import *
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error
 from IDW import perform_IDW
 from krig import perform_Krig
 from ensemble import perform_ensemble
@@ -39,7 +39,8 @@ def evaluate_predictions(y_true, y_pred):
     """
     Compute evaluation metrics: MAE, RMSE.
     """
-    mae = mean_absolute_error(y_true, y_pred)
+    mae = median_absolute_error(y_true, y_pred)
+    # mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     return {"MAE": mae, "RMSE": rmse}
 
@@ -62,9 +63,9 @@ def evaluate_predictions(y_true, y_pred):
 # mae = random_idw_metrics["MAE"]
 # print(mae)
 
-def do_IDW(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder"):
+def do_IDW(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder", position_cols=[]):
     # Evaluate IDW
-    random_test_df, block_test_df = perform_IDW(target=target, this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
+    random_test_df, block_test_df = perform_IDW(target=target, this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block, position_cols=position_cols)
     random_idw_metrics = evaluate_predictions(random_test_df[target], random_test_df["idw_predicted_"+target])
     block_idw_metrics = evaluate_predictions(block_test_df[target], block_test_df["idw_predicted_"+target])
     print("Random IDW Performance:", random_test_df)
@@ -77,9 +78,9 @@ def do_IDW(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0,
     return random_mae, random_rmse, block_mae, block_rmse
 
 
-def do_Krig(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder"):
+def do_Krig(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, file_name = "placeholder", position_cols=[]):
     # Evaluate IDW
-    random_test_df, block_test_df = perform_Krig(target=target, this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
+    random_test_df, block_test_df = perform_Krig(target=target, this_filename=file_name, test_size=size, test_fraction=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block, position_cols=position_cols)
     random_kriging_metrics = evaluate_predictions(random_test_df[target], random_test_df["kriging_predicted_"+target])
     block_kriging_metrics = evaluate_predictions(block_test_df[target], block_test_df["kriging_predicted_"+target])
     print("Random IDW Performance:", random_test_df)
@@ -91,8 +92,8 @@ def do_Krig(target = "rsrp", size = 0.3, this_train_random=0, this_test_random=0
 
     return random_mae, random_rmse, block_mae, block_rmse
 
-def do_Ensemble(target = "rsrp", size=0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0):
-    random_ensemble, block_ensemble = perform_ensemble(target=target, size=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block)
+def do_Ensemble(target = "rsrp", size=0.3, this_train_random=0, this_test_random=0, this_train_block=0, this_test_block=0, position_cols=[]):
+    random_ensemble, block_ensemble = perform_ensemble(target=target, size=size, train_random=this_train_random, test_random=this_test_random, train_block=this_train_block, test_block=this_test_block, position_cols=position_cols)
     # Print results
     # RF
     # Access Random Forest results from the nested dictionary
@@ -232,8 +233,8 @@ def evaluate_mlp(model, X_test, y_test):
         MAE and RMSE.
     """
     predictions = model.predict(X_test).flatten()  # Ensure predictions are 1D
-    
-    mae = mean_absolute_error(y_test, predictions)
+    # mae = mean_absolute_error(y_test, predictions)
+    mae = median_absolute_error(y_test, predictions)
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
 
     return mae, rmse

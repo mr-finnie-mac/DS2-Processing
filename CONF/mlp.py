@@ -4,9 +4,9 @@ from keras.models import Model
 from keras.callbacks import EarlyStopping
 import keras_tuner as kt
 
-def build_mlp(input_shape, num_layers=2, num_neurons=128, dropout_rate=0.5, lr = 0.01):
+def build_mlp(input_shape, num_layers=4, num_neurons=128, dropout_rate=0.5, lr = 0.01):
     model = tf.keras.models.Sequential()
-    
+    # num_neurons=5000
     # Input layer
     model.add(tf.keras.layers.Dense(num_neurons, input_shape=(input_shape,), activation='relu'))
     model.add(tf.keras.layers.BatchNormalization())

@@ -3,6 +3,7 @@ from spatial_test_train_split import perform_splits
 import numpy as np
 import config
 import pickle
+from config import *
 
 def kriging_interpolation(train_df, test_df, position_cols, signal_col):
     """
@@ -30,7 +31,7 @@ def kriging_interpolation(train_df, test_df, position_cols, signal_col):
     # Ordinary Kriging model with nugget effect for stability
     OK = OrdinaryKriging(
         train_positions[0], train_positions[1], train_values,# X, Y, Signal
-        variogram_model="gaussian", # "spherical", "linear", "power", "exponential" <-good for abrupt change, "gaussian" <- good for some sharp changes
+        variogram_model="linear", # "spherical", "linear", "power", "exponential" <-good for abrupt change, "gaussian" <- good for some sharp changes
         verbose=False,
         enable_plotting=False
     )
@@ -40,16 +41,16 @@ def kriging_interpolation(train_df, test_df, position_cols, signal_col):
 
     return interpolated_values
 
-def perform_Krig(target = "rsrp", this_filename = "placeholder.py", test_size = 0.2, test_fraction = 0.2, train_random=0, test_random=0, train_block=0, test_block=0):
+def perform_Krig(target = "rsrp", this_filename = "placeholder.py", test_size = 0.2, test_fraction = 0.2, train_random=0, test_random=0, train_block=0, test_block=0, position_cols=[]):
     # train_random, test_random, train_block, test_block = perform_splits(filename=this_filename,  this_test_size=test_size, this_n_clusters = 10, this_test_fraction = test_fraction)
 
     # rsrp example
-    position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
+    print("krig-position_cols:", position_cols)
     signal_col = target  # Can change to 'rssi', 'sinr', etc.
 
     random_test_df = test_random.copy()  # Keep original test data for comparison
     # Example usage with RSRP signal
-    random_test_df["kriging_predicted_"+target] = kriging_interpolation(train_random, test_random, position_cols[:2], signal_col)
+    random_test_df["kriging_predicted_"+target] = kriging_interpolation(train_random, test_random, position_cols, signal_col)
 
     # print(test_df[["rsrp", "kriging_predicted_rsrp"]])  # Compare actual vs. predicted
 
@@ -59,7 +60,7 @@ def perform_Krig(target = "rsrp", this_filename = "placeholder.py", test_size = 
 
     block_test_df = test_block.copy()  # Keep original test data for comparison
     # Example usage with RSRP signal
-    block_test_df["kriging_predicted_"+target] = kriging_interpolation(train_block, test_block, position_cols[:2], signal_col)
+    block_test_df["kriging_predicted_"+target] = kriging_interpolation(train_block, test_block, position_cols, signal_col)
     
     krig_data = random_test_df[["gps.lat", "gps.lon", "rsrp"]].copy()
 

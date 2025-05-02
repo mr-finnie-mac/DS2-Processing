@@ -23,7 +23,7 @@ import torch.nn as nn
 from eval_baselines import *
 # import torch.optim as optim
 import joblib
-
+from sklearn.linear_model import LinearRegression
 import torch
 import torch.nn as nn
 import numpy as np
@@ -891,102 +891,309 @@ def spatial_block_split(dataset, test_size=0.2, n_clusters=10):
     test_set = test_set.drop(columns=['cluster'])
 
     return train_set, test_set
-
-def run_comparisons(dataset, cross_dataset, feature_list, target_column, random_states=[42, 7, 11, 22, 33, 44, 55, 66, 77, 88]):
+def temporal_block_split(dataset, timestamp_col='drone_timestamp', test_size=0.2):
     """
-    Run model comparisons (MLP, IDW, Kriging, Ensemble) using consistent train/test splits.
+    Perform a temporal train-test split by sorting on the timestamp and splitting sequentially.
 
     Args:
-        dataset: Main dataset for training/testing.
-        cross_dataset: Secondary dataset for evaluating generalization.
-        feature_list: List of feature column names.
-        target_column: Target variable (e.g., signal strength).
-        random_states: List of random states for multiple runs.
+        dataset: DataFrame containing the timestamp column.
+        timestamp_col: Name of the column containing the timestamp.
+        test_size: Fraction of data to use for testing.
 
     Returns:
-        Prints the average results for each model.
+        train_set: DataFrame for training.
+        test_set: DataFrame for testing.
     """
-    plot_3d_datasets(dataset, cross_dataset)
-    # Store results
-    comparison_rsrp = []  # To store MAE results
-    error_data_block = []  # To store RMSE results
-    
-    # Initialize dictionary to store performance results
-    avg_results = {
-        'MLP': {'mae': [], 'rmse': []},
-        'IDW': {'mae': [], 'rmse': []},
-        'Kriging': {'mae': [], 'rmse': []},
-        'Ensemble': {'mae': [], 'rmse': []}
+    dataset = dataset.copy()
+
+    # Ensure timestamp column is converted to datetime
+    try:
+        dataset[timestamp_col] = pd.to_datetime(dataset[timestamp_col])
+    except Exception as e:
+        raise ValueError(f"Failed to convert '{timestamp_col}' to datetime: {e}")
+
+    # Sort chronologically
+    dataset = dataset.sort_values(by=timestamp_col).reset_index(drop=True)
+
+    # Split index based on test size
+    split_idx = int(len(dataset) * (1 - test_size))
+
+    # Sequential split
+    train_set = dataset.iloc[:split_idx]
+    test_set = dataset.iloc[split_idx:]
+
+    return train_set, test_set
+
+
+from sklearn.preprocessing import StandardScaler
+
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import time
+
+def mlp_point_by_point(dataset, target_column="rssi", features=['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL'], method='ANN'):
+    point_results = {
+        method: {'mae': [], 'rmse': []}
     }
+    csv_results = []
+
+    dataset = add_features(dataset)
+    dataset['drone_timestamp'] = pd.to_datetime(dataset['drone_timestamp'])
+    dataset['timestamp_numeric'] = dataset['drone_timestamp'].astype(np.int64) // 10**9  # seconds since epoch
+
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL', 'timestamp_numeric']
+
+    # Train/test split
+    split_index = len(dataset) // 2
+    train_set = dataset.iloc[:split_index]
+    test_set = dataset.iloc[split_index:]
+    plot_3d_datasets(train_set, test_set)
+
+
+    # Scale all features including timestamp
+    scaler = StandardScaler()
+    scaler.fit(train_set[features].values)
+
+    X_train = scaler.transform(train_set[features].values)
+    y_train = train_set[target_column].values
+
+    # Train the MLP
+    mlp_model = run_mlp(
+        input_dim=X_train.shape[1],
+        X_train=X_train,
+        y_train=y_train,
+        X_test=X_train,  # not used, can be left out
+        y_test=y_train,
+        epochs=1000
+    )
+
+    # Evaluate point-by-point
+    for _, test_row in test_set.iterrows():
+        test_features = test_row[features].values.reshape(1, -1)
+        X_test_point = scaler.transform(test_features)
+        y_test_point = np.array([test_row[target_column]])
+
+        y_pred = mlp_model.predict(X_test_point)
+        mae, rmse =evaluate_mlp(model=mlp_model, X_test=X_test_point, y_test=y_test_point)
+
+        point_results[method]['mae'].append(mae)
+        point_results[method]['rmse'].append(rmse)
+
+        csv_results.append({
+            'Timestamp': test_row['drone_timestamp'],
+            'lat': test_row['gps.lat'],
+            'lon': test_row['gps.lon'],
+            'alt': test_row['altitudeAMSL'],
+            'True': y_test_point[0],
+            'Predicted': y_pred[0],
+            'MAE': mae,
+            'RMSE': rmse
+        })
+
+    # Save results
+    df = pd.DataFrame(csv_results)
+    df.to_csv('method_pbyp_results.csv', index=False)
+    return point_results
+
     
-    # Extract cross-dataset features and targets
-    X_cross_test = cross_dataset[feature_list].values
+
+
+def run_comparisons(dataset, cross_dataset, feature_list, target_column, random_states=[11, 45, 35, 65, 98, 56, 28, 81, 34, 20, 26, 52, 7, 48], test_sizes=[0.1, 0.2, 0.3, 0.4, 0.5], split_type="", save_name="new-"):
+    """
+    Run model comparisons (MLP, IDW, Kriging, Ensemble) using consistent train/test splits.
+    """
+    # Initialize scalers
+    scaler = StandardScaler()
+    scaler.fit(dataset[feature_list].values)
+
+    # Scaled cross-dataset for MLP
+    X_cross_test = scaler.transform(cross_dataset[feature_list].values)
     Y_cross_test = cross_dataset[target_column].values
 
-    test_size = 0.8  # Fixed test size for all models
+    # Store results
+    avg_results = {
+        'ANN': {'mae': [], 'rmse': []},
+        'IDW': {'mae': [], 'rmse': []},
+        'Kriging': {'mae': [], 'rmse': []},
+        'Ensemble': {'mae': [], 'rmse': []},
+        'LinReg': {'mae': [], 'rmse': []}
+    }
+    detailed_results = []
+
+    
 
     for rand_state in random_states:
-        print(f"\nRunning with random state: {rand_state}")
+        for ts in test_sizes:
+            print(f"Doing TS {ts}")
+                
+            print(f"\nRunning with random state: {rand_state}")
+            test_size = ts  # Fixed test size for all models
+            # Train/Test Split
+            if split_type == "rand": # random
+                train_set, test_set = train_test_split(dataset, test_size=test_size, random_state=rand_state)
+                cross_train_set, cross_test_set = train_test_split(cross_dataset, test_size=test_size, random_state=rand_state)
+            elif split_type == "temp": # temporal
+                train_set, test_set = temporal_block_split(dataset, test_size=test_size)
+                cross_train_set, cross_test_set =  temporal_block_split(cross_dataset, test_size=test_size)
+            elif split_type == "block": # block split
+                train_set, test_set = spatial_block_split(dataset, test_size=test_size, n_clusters=4)
+                cross_train_set, cross_test_set = spatial_block_split(cross_dataset, test_size=test_size, n_clusters=4)
+            else:
+                 train_set, test_set = train_test_split(dataset, test_size=test_size, random_state=rand_state)
+                 cross_train_set, cross_test_set = train_test_split(cross_dataset, test_size=test_size, random_state=rand_state)
 
-        # ----- Train/Test Split -----
-        # train_set, test_set = train_test_split(dataset, test_size=test_size, random_state=rand_state)
-        train_set, test_set = spatial_block_split(dataset, test_size=test_size, n_clusters=4)
-        
-        # Features and target variable
-        X_train = train_set[feature_list].values
-        y_train = train_set[target_column].values
-        X_test = test_set[feature_list].values
-        y_test = test_set[target_column].values
+            # Prepare features and target variables for training and testing
+            # timestamp_features = ['gps.lat', 'gps.lon', 'altitudeAMSL', 'drone_timestamp']
+            X_train = train_set[feature_list].values
+            y_train = train_set[target_column].values
+            X_test = test_set[feature_list].values
+            y_test = test_set[target_column].values
 
-        # Remove overlap in cross_dataset to avoid data leakage
-        # cross_test_set = cross_dataset[~cross_dataset.index.isin(train_set.index)]
-        # common_points = cross_dataset[cross_dataset.index.isin(train_set.index)]
-        # print(f"Number of test points also in train set: {len(common_points)}")
+            # Normalize the data
+            X_train_scaled = scaler.transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
 
-        # -----  MLP Model -----
-        mlp_model = run_mlp(input_dim=len(feature_list), X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, epochs=1000)
-        # plot_3d_datasets(train_set, test_set)
-        test_mae, test_rmse = evaluate_mlp(model=mlp_model, X_test=X_test, y_test=y_test)
-        cross_mae, cross_rmse = evaluate_mlp(model=mlp_model, X_test=X_cross_test, y_test=Y_cross_test)
+            #CROSS SETUP
+            X_train_cross = cross_train_set[feature_list].values
+            y_train_cross = cross_train_set[target_column].values
+            X_test_cross = cross_test_set[feature_list].values
+            y_test_cross = cross_test_set[target_column].values
 
-        avg_results['MLP']['mae'].append(cross_mae)
-        avg_results['MLP']['rmse'].append(cross_rmse)
+            # Normalize the data
+            X_train_scaled_cross = scaler.transform(X_train_cross)
+            X_test_scaled_cross = scaler.transform(X_test_cross)
 
-        print(f"MLP - Test Set (Same Path): MAE {test_mae:.4f}, RMSE {test_rmse:.4f}")
-        print(f"MLP - Cross-Test Set (Different Path): MAE {cross_mae:.4f}, RMSE {cross_rmse:.4f}")
+            # ----- Linear Regression Baseline -----
+            lr_model = LinearRegression()
+            lr_model.fit(X_train_scaled, y_train)
 
-        # plot_3d_datasets(train_set, test_set)
-        # ----- IDW Model -----
-        rand_mae, rand_rmse, block_mae, _ = do_IDW(
-            target=target_column, size=test_size, 
-            this_train_random=train_set, this_test_random=test_set,
-            this_train_block=train_set, this_test_block=test_set
-        )
-        avg_results['IDW']['mae'].append(rand_mae)
-        avg_results['IDW']['rmse'].append(rand_rmse)
+            # Evaluate on the same path test set
+            y_pred_lr_test = lr_model.predict(X_test_scaled)
+            test_mae_lr = median_absolute_error(y_test, y_pred_lr_test)
+            test_rmse_lr = np.sqrt(mean_squared_error(y_test, y_pred_lr_test))
 
-        # ----- Kriging Model -----
-        rand_mae, rand_rmse, block_mae, _ = do_Krig(
-            target=target_column, size=test_size, 
-            this_train_random=train_set, this_test_random=test_set,
-            this_train_block=train_set, this_test_block=test_set
-        )
-        avg_results['Kriging']['mae'].append(rand_mae)
-        avg_results['Kriging']['rmse'].append(rand_rmse)
+            # Evaluate on the cross path test set
+            y_pred_lr_cross = lr_model.predict(X_cross_test)
+            cross_mae_lr = median_absolute_error(Y_cross_test, y_pred_lr_cross)
+            cross_rmse_lr = np.sqrt(mean_squared_error(Y_cross_test, y_pred_lr_cross))
 
-        # ----- Ensemble Model -----
-        rf_rand_mae, _, rf_block_mae, _, \
-        xg_rand_mae, _, xg_block_mae, _, \
-        lg_rand_mae, _, lg_block_mae, _, \
-        ens_rand_mae, ens_rand_rmse, ens_block_mae, _ = do_Ensemble(
-            target=target_column, size=test_size, 
-            this_train_random=train_set, this_test_random=test_set,
-            this_train_block=train_set, this_test_block=test_set
-        )
-        avg_results['Ensemble']['mae'].append(ens_rand_mae)
-        avg_results['Ensemble']['rmse'].append(ens_rand_rmse)
+            # Save to avg_results
+            avg_results['LinReg']['mae'].append(test_mae_lr)
+            avg_results['LinReg']['rmse'].append(test_rmse_lr)
 
-    # ----- Compute Averages -----
+            # Save detailed results
+            detailed_results.append({'model': 'LinReg', 'metric': 'mae', 'split': 'test', 'size': test_size, 'value': test_mae_lr})
+            detailed_results.append({'model': 'LinReg', 'metric': 'rmse', 'split': 'test', 'size': test_size, 'value': test_rmse_lr})
+            detailed_results.append({'model': 'LinReg', 'metric': 'mae', 'split': 'cross', 'size': test_size, 'value': cross_mae_lr})
+            detailed_results.append({'model': 'LinReg', 'metric': 'rmse', 'split': 'cross', 'size': test_size, 'value': cross_rmse_lr})
+
+            print(f"Linear Regression - Test Set (Same Path): MAE {test_mae_lr:.4f}, RMSE {test_rmse_lr:.4f}")
+            print(f"Linear Regression - Cross-Test Set (Different Path): MAE {cross_mae_lr:.4f}, RMSE {cross_rmse_lr:.4f}")
+
+            
+            # ----- ANN -----
+            mlp_model = run_mlp(input_dim=len(feature_list), X_train=X_train_scaled, y_train=y_train, X_test=X_test_scaled, y_test=y_test, epochs=1000)
+            mlp_model_cross = run_mlp(input_dim=len(feature_list), X_train=X_train_scaled, y_train=y_train, X_test=X_test_scaled_cross, y_test=y_test_cross, epochs=1000)
+            test_mae, test_rmse = evaluate_mlp(model=mlp_model, X_test=X_test_scaled, y_test=y_test)
+            cross_mae, cross_rmse = evaluate_mlp(model=mlp_model_cross, X_test=X_cross_test, y_test=Y_cross_test)
+
+            avg_results['ANN']['mae'].append(test_mae)
+            avg_results['ANN']['rmse'].append(test_rmse)
+
+            # Save the results for ANN
+            detailed_results.append({'model': 'ANN', 'metric': 'mae', 'split': 'test', 'size': test_size, 'value': test_mae})
+            detailed_results.append({'model': 'ANN', 'metric': 'rmse', 'split': 'test', 'size': test_size,'value': test_rmse})
+            detailed_results.append({'model': 'ANN', 'metric': 'mae', 'split': 'cross', 'size': test_size,'value': cross_mae})
+            detailed_results.append({'model': 'ANN', 'metric': 'rmse', 'split': 'cross', 'size': test_size,'value': cross_rmse})
+
+            print(f"ANN - Test Set (Same Path): MAE {test_mae:.4f}, RMSE {test_rmse:.4f}")
+            print(f"MLP - Cross-Test Set (Different Path): MAE {cross_mae:.4f}, RMSE {cross_rmse:.4f}")
+
+            # ----- IDW -----
+            train_idw = train_set.copy()
+            test_idw = test_set.copy()
+            train_idw[feature_list] = scaler.transform(train_idw[feature_list])
+            test_idw[feature_list] = scaler.transform(test_idw[feature_list])
+
+            rand_mae, rand_rmse, block_mae, _ = do_IDW(
+                target=target_column, size=test_size, 
+                this_train_random=train_idw, this_test_random=test_idw,
+                this_train_block=train_idw, this_test_block=test_idw, position_cols=feature_list
+            )
+            # Cross dataset evaluation for IDW
+            cross_train_idw = cross_dataset.copy()
+            cross_train_idw[feature_list] = scaler.transform(cross_train_idw[feature_list])
+
+            cross_rand_mae, cross_rand_rmse, _, _ = do_IDW(
+                target=target_column, size=test_size, 
+                this_train_random=train_idw, this_test_random=cross_train_idw,
+                this_train_block=train_idw, this_test_block=cross_train_idw, position_cols=feature_list
+            )
+
+            avg_results['IDW']['mae'].append(rand_mae)
+            avg_results['IDW']['rmse'].append(rand_rmse)
+
+            # Save IDW results
+            detailed_results.append({'model': 'IDW', 'metric': 'mae', 'split': 'test','size': test_size, 'value': rand_mae})
+            detailed_results.append({'model': 'IDW', 'metric': 'rmse', 'split': 'test','size': test_size, 'value': rand_rmse})
+            detailed_results.append({'model': 'IDW', 'metric': 'mae', 'split': 'cross', 'size': test_size,'value': cross_rand_mae})
+            detailed_results.append({'model': 'IDW', 'metric': 'rmse', 'split': 'cross','size': test_size, 'value': cross_rand_rmse})
+
+            # ----- Kriging -----
+            train_krig = train_set.copy()
+            test_krig = test_set.copy()
+            # train_krig[feature_list] = scaler.transform(train_krig[feature_list])
+            # test_krig[feature_list] = scaler.transform(test_krig[feature_list])
+
+            rand_mae, rand_rmse, block_mae, _ = do_Krig(
+                target=target_column, size=test_size, 
+                this_train_random=train_krig, this_test_random=test_krig,
+                this_train_block=train_krig, this_test_block=test_krig, position_cols=feature_list
+            )
+            cross_rand_mae, cross_rand_rmse, _, _ = do_Krig(
+                target=target_column, size=test_size, 
+                this_train_random=train_krig, this_test_random=cross_dataset,
+                this_train_block=train_krig, this_test_block=cross_dataset, position_cols=feature_list
+            )
+
+            avg_results['Kriging']['mae'].append(rand_mae)
+            avg_results['Kriging']['rmse'].append(rand_rmse)
+
+            # Save Kriging results
+            detailed_results.append({'model': 'Kriging', 'metric': 'mae', 'split': 'test','size': test_size, 'value': rand_mae})
+            detailed_results.append({'model': 'Kriging', 'metric': 'rmse', 'split': 'test','size': test_size, 'value': rand_rmse})
+            detailed_results.append({'model': 'Kriging', 'metric': 'mae', 'split': 'cross','size': test_size, 'value': cross_rand_mae})
+            detailed_results.append({'model': 'Kriging', 'metric': 'rmse', 'split': 'cross','size': test_size, 'value': cross_rand_rmse})
+
+            # ----- Ensemble -----
+            rf_rand_mae, _, rf_block_mae, _, \
+            xg_rand_mae, _, xg_block_mae, _, \
+            lg_rand_mae, _, lg_block_mae, _, \
+            ens_rand_mae, ens_rand_rmse, ens_block_mae, _ = do_Ensemble(
+                target=target_column, size=test_size, 
+                this_train_random=train_set, this_test_random=test_set,
+                this_train_block=train_set, this_test_block=test_set, position_cols=feature_list
+            )
+            rf_rand_mae, _, rf_block_mae, _, \
+            xg_rand_mae, _, xg_block_mae, _, \
+            lg_rand_mae, _, lg_block_mae, _, \
+            cross_ens_rand_mae, cross_ens_rand_rmse, _, _ = do_Ensemble(
+                target=target_column, size=test_size, 
+                this_train_random=train_set, this_test_random=cross_dataset,
+                this_train_block=train_set, this_test_block=cross_dataset, position_cols=feature_list
+            )
+
+            avg_results['Ensemble']['mae'].append(ens_rand_mae)
+            avg_results['Ensemble']['rmse'].append(ens_rand_rmse)
+
+            # Save Ensemble results
+            detailed_results.append({'model': 'Ensemble', 'metric': 'mae', 'split': 'test','size': test_size, 'value': ens_rand_mae})
+            detailed_results.append({'model': 'Ensemble', 'metric': 'rmse', 'split': 'test', 'size': test_size,'value': ens_rand_rmse})
+            detailed_results.append({'model': 'Ensemble', 'metric': 'mae', 'split': 'cross', 'size': test_size,'value': cross_ens_rand_mae})
+            detailed_results.append({'model': 'Ensemble', 'metric': 'rmse', 'split': 'cross','size': test_size, 'value': cross_ens_rand_rmse})
+
+    # Compute Averages
     print("\nFinal Average Results:")
     for model, results in avg_results.items():
         avg_mae = np.mean(results['mae'])
@@ -995,29 +1202,331 @@ def run_comparisons(dataset, cross_dataset, feature_list, target_column, random_
         print(f"  - Average MAE: {avg_mae:.4f}")
         print(f"  - Average RMSE: {avg_rmse:.4f}")
 
+    # Save detailed results to CSV
+    df = pd.DataFrame(detailed_results)      
+    df.to_csv(save_name+'model_comparison_results.csv', index=False)
+    return df
+
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+# def plot_mae_comparison(csv1_path, csv2_path, labels=("a) Temporal Split", "b) Spiral Temporal Split"), split='test', csvFlag=True, show = True):
+#     # Load CSVs
+#     if csvFlag:
+#         df1 = pd.read_csv(csv1_path)
+#         df2 = pd.read_csv(csv2_path)
+#     else:
+#         df1 = csv1_path
+#         df2 = csv2_path
+
+#     # Filter for MAE only and the specified split
+#     df1_mae = df1[(df1['metric'] == 'mae') & (df1['split'] == split)].copy()
+#     df2_mae = df2[(df2['metric'] == 'mae') & (df2['split'] == split)].copy()
+
+#     # Convert test size to float
+#     df1_mae['size'] = df1_mae['size'].astype(float)
+#     df2_mae['size'] = df2_mae['size'].astype(float)
+
+#     # Set seaborn theme
+#     sns.set(style="whitegrid")
+
+#     # Create subplots
+#     fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+#     plt.rcParams.update({
+#         "font.family": "serif",
+#         "font.serif": ["Times New Roman"],
+#         "axes.labelsize": 18,
+#         "legend.fontsize": 12,
+#         "xtick.labelsize": 10,
+#         "ytick.labelsize": 10,
+#         "lines.linewidth": 3,
+#         "lines.markersize": 10
+#     })
+
+#     for i, (ax, df, caption) in enumerate(zip(axes, [df1_mae, df2_mae], labels)):
+#         sns.lineplot(
+#             data=df,
+#             x="size",
+#             y="value",
+#             hue="model",
+#             style="model",
+#             markers=True,
+#             dashes=True,
+#             ax=ax,
+#             linewidth=plt.rcParams['lines.linewidth'],
+#             markersize=plt.rcParams['lines.markersize']
+#         )
+#         ax.set_xlabel("Test Size")
+#         if i == 0:
+#             ax.set_ylabel("Median Absolute Error")
+#         else:
+#             ax.set_ylabel("")
+#         ax.legend(title="Model")
+#         if i == 0:
+#             ax.get_legend().remove()  # Remove legend from first plot
+        
+#         # Add caption under each plot
+#         ax.text(0.5, -0.25, caption, transform=ax.transAxes,
+#                 ha='center', va='top', fontsize=16)
+
+#     plt.tight_layout()
+#     if show:
+#         plt.show()
+
+
+def plot_mae_comparison(csv1_path, csv2_path, labels=("a) Temporal Split", "b) Spiral Temporal Split"), split='test', csvFlag=True, show=True):
+    # Load CSVs
+    if csvFlag:
+        df1 = pd.read_csv(csv1_path)
+        df2 = pd.read_csv(csv2_path)
+    else:
+        df1 = csv1_path
+        df2 = csv2_path
+
+    # Filter for MAE and the specified split
+    df1_mae = df1[(df1['metric'] == 'mae') & (df1['split'] == split)].copy()
+    df2_mae = df2[(df2['metric'] == 'mae') & (df2['split'] == split)].copy()
+
+    # Remove 'LinReg' and rename 'ANN' to 'OURS[ANN]'
+    def preprocess(df):
+        df = df[df['model'] != 'LinReg'].copy()
+        df['model'] = df['model'].replace({'ANN': 'OURS [ANN]'})
+        df['size'] = df['size'].astype(float)
+        return df
+
+    df1_mae = preprocess(df1_mae)
+    df2_mae = preprocess(df2_mae)
+
+    # Set seaborn theme
+    sns.set(style="whitegrid")
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman"],
+        "axes.labelsize": 18,
+        "legend.fontsize": 12,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "lines.linewidth": 4,
+        "lines.markersize": 12
+    })
+
+    # Create subplots
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+
+    handles = labels_ = None  # For legend outside the plot
+
+    for i, (ax, df, caption) in enumerate(zip(axes, [df1_mae, df2_mae], labels)):
+        plot = sns.lineplot(
+            data=df,
+            x="size",
+            y="value",
+            hue="model",
+            style="model",
+            markers=True,
+            dashes=True,
+            ax=ax,
+            linewidth=plt.rcParams['lines.linewidth'],
+            markersize=plt.rcParams['lines.markersize']
+        )
+
+        if i == 0:
+            ax.set_ylabel("Median Absolute Error")
+        else:
+            ax.set_ylabel("")
+
+        ax.set_xlabel("Test Size")
+
+        # Capture legend handles and labels from the second subplot only
+        if i == 1:
+            # handles, labels_ = ax.get_legend_handles_labels()
+            ax.get_legend().remove()  # Remove in all plots
+
+        # Add caption below each plot
+        ax.text(0.5, -0.25, caption, transform=ax.transAxes,
+                ha='center', va='top', fontsize=16)
+        ax.legend(title="Model")
+        if i == 0:
+            ax.get_legend().remove()  # Remove legend from first plot
+
+    # Add a single shared legend to the right of the second plot
+    # if handles and labels_:
+    #     fig.legend(handles, labels_, title="Model", loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=12, title_fontsize=14)
+
+    plt.tight_layout(rect=[0, 0, 0.95, 1])
+    if show:
+        plt.show()
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def plot_point_by_point_comparison(csv1_path, csv2_path, labels=("a) Method 1", "b) Method 2"), csvFlag=True):
+    # Load CSVs
+    if csvFlag:
+        df1 = pd.read_csv(csv1_path, parse_dates=["Timestamp"])
+        df2 = pd.read_csv(csv2_path, parse_dates=["Timestamp"])
+    else:
+        df1 = csv1_path
+        df2 = csv2_path
+
+    sns.set(style="whitegrid")
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman"],
+        "axes.labelsize": 18,
+        "legend.fontsize": 12,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 2,
+        "lines.markersize": 6
+    })
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+
+    for i, (ax, df, caption) in enumerate(zip(axes, [df1, df2], labels)):
+        # Sort by time to make lines clean
+        df = df.sort_values("Timestamp")
+
+        # Plot True and Predicted values
+        ax.plot(df["Timestamp"], df["True"], label="True RSSI", marker='o', linestyle='-', color='tab:blue')
+        ax.plot(df["Timestamp"], df["Predicted"], label="Predicted RSSI", marker='x', linestyle='--', color='tab:red')
+
+        ax.set_xlabel("Timestamp")
+        if i == 0:
+            ax.set_ylabel("RSSI")
+        else:
+            ax.set_ylabel("")
+
+        ax.set_title(f"RSSI Comparison")
+        ax.legend()
+        ax.tick_params(axis='x', rotation=45)
+
+        # Add subplot label
+        ax.text(0.5, -0.35, caption, transform=ax.transAxes,
+                ha='center', va='top', fontsize=16)
+
+    plt.tight_layout()
+    plt.show()
+
+
 
 
 from keras_tuner import RandomSearch
 
 if __name__ == '__main__':
+    
+    rows = "CONF/cleaned_rows.csv"
+    spiral = "CONF/cleaned_spiral.csv"
+    # mlp_point_by_point(dataset=pd.read_csv(spiral))
+
+    # plot_mae_comparison(csv1_path="model_comparison_results-rows-cross-spiral.csv", csv2_path="model_comparison_results-spiral-cross-rows.csv", labels=("rows", "spiral"))
+
+    # plot_mae_comparison(csv1_path="model_comparison_results-rows temporal.csv", csv2_path="model_comparison_results-spiral temporal.csv", labels=("rows", "spiral"))
 
     # Example usage:
-    file_name = "CONF/cleaned_rows.csv"
-    file_name2 = "CONF/cleaned_spiral.csv"
+    
 
-    dataset = pd.read_csv(file_name)
-    cross_dataset = pd.read_csv(file_name2)
+    dataset = pd.read_csv(rows)
+    cross_dataset = pd.read_csv(spiral)
 
     # Add features to datasets (e.g., distance_to_tower, azimuth, etc.)
     dataset = add_features(dataset)
     cross_dataset = add_features(cross_dataset)
 
     # Define features and target
-    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL']
-    target = 'rssi'
+    # features = ['distance_to_tower', 'azimuth', 'elevation_angle'] 
+    # features = ['gps.lat', 'gps.lon', 'altitudeAMSL']
+    # features = ['gps.lat', 'gps.lon', 'altitudeAMSL']
+    # features = ['gps.lat', 'gps.lon', 'altitudeAMSL', 'drone_timestamp']
+    
+    # PLOT STORED RESULTS
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_model_comparison_results.csv', csv2_path='best_results/spiral_layer_model_comparison_results.csv', labels=("a) Rows Layer (Rand)", "b) Spiral Layer (Rand)"), split='test', csvFlag=True, show=True) # present same layer plot
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_block_model_comparison_results.csv', csv2_path='best_results/spiral_layer_block_model_comparison_results.csv', labels=("a) Rows Layer (Block)", "b) Spiral Layer (Block)"), split='test', csvFlag=True, show=True) # present same layer plot block
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_model_comparison_results.csv', csv2_path='best_results/spiral_layer_model_comparison_results.csv', labels=("a) Rows Cross Layer (Rand)", "b) Spiral Cross Layer (Rand)"), split='cross', csvFlag=True, show=True) # present cross layer plot rand
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_block_model_comparison_results.csv', csv2_path='best_results/spiral_layer_block_model_comparison_results.csv', labels=("a) Rows Cross Layer (Block)", "b) Spiral Cross Layer (Block)"), split='cross', csvFlag=True, show=True) # present cross layer plot block
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_xyz_model_comparison_results.csv', csv2_path='best_results/rows_layer_aed_model_comparison_results.csv', labels=("a) Rows XYZ only (Rand)", "b) Rows AED only (Rand)"), split='test', csvFlag=True, show=True)
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_xyz_model_comparison_results.csv', csv2_path='best_results/rows_layer_aed_model_comparison_results.csv', labels=("a) Rows XYZ", "b) Rows AED"), split='cross', csvFlag=True, show=True)
+    # plot_mae_comparison(csv1_path='best_results/rows_layer_xyz_timesplitmodel_comparison_results.csv', csv2_path='best_results/rows_layer_xyz_ts_timesplitmodel_comparison_results.csv', labels=("a) Rows XYZ", "b) Rows XYZ Timeseries"), split='test', csvFlag=True)
+    # plot_mae_comparison(csv1_path='best_results/spiral_layer_xyz_model_comparison_results.csv', csv2_path='best_results/spiral_layer_aed_model_comparison_results.csv', labels=("a) Spiral Cross XYZ  (Rand)", "b) Spiral Cross AED (Rand)"), split='cross', csvFlag=True, show=True)
+    plot_mae_comparison(csv1_path='best_results/spiral_layer_xyz_timesplitmodel_comparison_results.csv', csv2_path='best_results/spiral_layer_xyz_ts_timesplitmodel_comparison_results.csv', labels=("a) Spiral XYZ", "b) Spiral XYZ Timeseries"), split='test', csvFlag=True)
 
-    # Run the comparison loop with random states
-    run_comparisons(dataset, cross_dataset, features, target)
+    # PARTIONING / SINGLE / CROSS
+    target = 'rssi'
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 
+                'gps.lat', 'gps.lon', 'altitudeAMSL']
+    
+    states = [11, 45, 35, 65, 98, 56, 28, 81, 34, 20]
+    # rows_layer = run_comparisons(dataset, cross_dataset, features, target, random_states=states,split_type="rand", save_name='rows_layer_') # random same layer rows
+    # print("set comp")
+    # rows_layer_block = run_comparisons(dataset, cross_dataset, features, target, random_states=states, split_type="block", save_name='rows_layer_block_') # block same layer rows
+    # print("set comp")
+    # spiral_layer = run_comparisons(cross_dataset, dataset, features, target, random_states=states, split_type="rand", save_name='spiral_layer_') #  random same layer spiral
+    # print("set comp")
+    # spiral_layer_block = run_comparisons(cross_dataset, dataset, features, target, random_states=states,split_type="block", save_name='spiral_layer_block_') # block same layer spiral
+    # print("set comp")
+    # print("same/cross layer set comp")
+    # plot_mae_comparison(csv1_path=rows_layer, csv2_path=spiral_layer, labels=("a) Rows Layer (Rand)", "b) Spiral Layer (Rand)"), split='test', csvFlag=False, show=False) # present same layer plot
+    # plot_mae_comparison(csv1_path=rows_layer_block, csv2_path=spiral_layer_block, labels=("a) Rows Layer (Block)", "b) Spiral Layer (Block)"), split='test', csvFlag=False, show=False) # present same layer plot block
+    # plot_mae_comparison(csv1_path=rows_layer, csv2_path=spiral_layer, labels=("a) Rows Cross Layer (Rand)", "b) Spiral Cross Layer (Rand)"), split='cross', csvFlag=False, show=False) # present cross layer plot rand
+    # plot_mae_comparison(csv1_path=rows_layer_block, csv2_path=spiral_layer_block, labels=("a) Rows Cross Layer (Block)", "b) Spiral Cross Layer (Block)"), split='cross', csvFlag=False, show=True) # present cross layer plot block
+
+
+    # # XYZ VS AED
+    # # Run the comparison loop with random states
+    # features = ['gps.lat', 'gps.lon', 'altitudeAMSL']
+    # # # chosen_features=features
+    # xyz_df = run_comparisons(dataset, cross_dataset, features, target,random_states=states, save_name='rows_layer_xyz_')
+    # print("xyz done")
+    # print("set comp")
+    # features = ['distance_to_tower', 'azimuth', 'elevation_angle']
+    # # chosen_features=features
+    # aed_df = run_comparisons(dataset, cross_dataset, features, target, random_states=states, save_name='rows_layer_aed_')
+    # print("aed done")
+    # print("set comp")
+    # plot_mae_comparison(csv1_path=xyz_df, csv2_path=aed_df, labels=("a) Rows XYZ only (Rand)", "b) Rows AED only (Rand)"), split='test', csvFlag=False, show=False)
+    # plot_mae_comparison(csv1_path=xyz_df, csv2_path=aed_df, labels=("a) Rows (Cross) XYZ only (Rand)", "b) Rows (Cross) AED only (Rand)"), split='cross', csvFlag=False, show=False)
+
+    # features = ['gps.lat', 'gps.lon', 'altitudeAMSL']
+    # # # chosen_features=features
+    # spiral_xyz_df = run_comparisons(cross_dataset, dataset, features, target,random_states=states, save_name='spiral_layer_xyz_')
+    # print("xyz done")
+    # print("set comp")
+    # features = ['distance_to_tower', 'azimuth', 'elevation_angle']
+    # # chosen_features=features
+    # spiral_aed_df = run_comparisons(cross_dataset, dataset, features, target, random_states=states, save_name='spiral_layer_aed_')
+    # print("aed done")
+    # print("set comp")
+    # plot_mae_comparison(csv1_path=spiral_xyz_df, csv2_path=spiral_aed_df, labels=("a) Spiral XYZ only (Rand)", "b) Spiral AED only (Rand)"), split='test', csvFlag=False, show=True)
+    # plot_mae_comparison(csv1_path=spiral_xyz_df, csv2_path=spiral_aed_df, labels=("a) Spiral (Cross) XYZ only (Rand)", "b) Spiral (Cross) AED only (Rand)"), split='cross', csvFlag=False, show=True)
+    
+    # TIMESERIES
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL', 'timestamp_numeric']
+    r_ann = 'ROWS-ANN'
+    r_annts = 'ROWS-ANN-TS' 
+    dataset = cross_dataset
+    # res_r_ann = mlp_point_by_point(dataset=dataset, method=r_ann)
+    # res_r_annts = mlp_point_by_point(dataset=dataset, features=features, method=r_annts)
+    # plot_point_by_point_comparison(csv1_path=res_r_ann, csv2_path=res_r_annts, labels=("a) Rows", "b) Rows as Timeseries"), csvFlag=False)
+    dataset['drone_timestamp'] = pd.to_datetime(dataset['drone_timestamp'])
+    dataset['timestamp_numeric'] = dataset['drone_timestamp'].astype(np.int64) // 10**9  # seconds since epoch
+    xyz_ts_df = run_comparisons(dataset, dataset, features, target, random_states=states, save_name='spiral_layer_xyz_ts_timesplit', split_type="temp")
+    print("set comp")
+    features = ['distance_to_tower', 'azimuth', 'elevation_angle', 'gps.lat', 'gps.lon', 'altitudeAMSL']
+    timesplit_xyz_ts_df = run_comparisons(dataset, dataset, features, target, random_states=states, save_name='spiral_layer_xyz_timesplit', split_type="temp")
+    print("set comp")
+    plot_mae_comparison(csv1_path=timesplit_xyz_ts_df, csv2_path=xyz_ts_df, labels=("a) Spiral XYZ", "b) Spiral XYZ Timeseries"), split='test', csvFlag=False)
+    
+
+
+
+
 
     tuner = RandomSearch(
         build_mlp_tuner,
@@ -1029,12 +1538,12 @@ if __name__ == '__main__':
     )
 
     # Load datasets
-    file_name = "CONF/cleaned_rows.csv"  # First dataset (e.g., straight-line path)
-    file_name2 = "CONF/cleaned_spiral.csv"  # Second dataset (spiral path)
+    rows = "CONF/cleaned_rows.csv"  # First dataset (e.g., straight-line path)
+    spiral = "CONF/cleaned_spiral.csv"  # Second dataset (spiral path)
 
 
-    dataset = pd.read_csv(file_name)  # Load first dataset
-    cross_dataset = pd.read_csv(file_name2)  # Load second dataset (unseen locations)
+    dataset = pd.read_csv(spiral)  # Load first dataset
+    cross_dataset = pd.read_csv(rows)  # Load second dataset (unseen locations)
 
     dataset = add_features(dataset)
     cross_dataset = add_features(cross_dataset)
@@ -1126,12 +1635,12 @@ if __name__ == '__main__':
     # # --- Run the Function ---
     # # saved_results = pd.read_csv("comparison_random_results.csv")
     # # plot_results(saved_results, "Single Layer Performance")
-    # file_name = "CONF/cleaned_rows.csv"
-    # file_name2 = "CONF/cleaned_spiral.csv"
+    #  = "CONF/cleaned_rows.csv"
+    # rows = "CONF/cleaned_spiral.csv"
     # ts = [0.1, 0.2, 0.3, 0.4, 0.5]
     # cross_ress = []
     # for t in ts:
-    #     res = test_cross_pretrained(file_name=file_name2, test_size=t)
+    #     res = test_cross_pretrained(file_name=rows, test_size=t)
     #     res.to_csv(f"compiled_cross_ds_unseen({t}).csv")
 
 
@@ -1152,17 +1661,13 @@ if __name__ == '__main__':
     # # print("TRA")
 
     # # run on transformer method
-    dataset = pd.read_csv(file_name)
-    dataset2 = pd.read_csv(file_name2)
+    dataset = pd.read_csv(spiral)
+    dataset2 = pd.read_csv(rows)
     # # cross_df = pd.concat([dataset, dataset2], axis=0)
     # test_sizes = [0.1, 0.2, 0.3, 0.4, 0.5]
     # for test_size in test_sizes:
     #     train_df, test_df = train_test_split(dataset2, test_size=test_size, random_state=42)
     #     cross_df = pd.concat([dataset, test_df], axis=0)
-
-
-
-    
     # new_method(input_df=dataset)
 
     new_method()
@@ -1252,7 +1757,6 @@ if __name__ == '__main__':
         # res_mae_rsrp = mean_absolute_error(res["true_rsrp"], res["predicted_rsrp"])
         # error_data_random.append([f"Transformer(H-{helpers_percentage})", test_size, res_mae_rsrp])
         # print(f"Help - {res_mae_rsrp}")
-
     
     comparison_rsrp = pd.DataFrame(comparison_rsrp, columns=["Method", "Test Size", "MAE"])
     comparison_rsrp.to_csv('latest-cross-comparison-rsrp.csv', index=False)

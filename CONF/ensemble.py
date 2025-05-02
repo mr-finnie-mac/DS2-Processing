@@ -3,12 +3,15 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 import xgboost as xgb
 import lightgbm as lgb
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error
 from spatial_test_train_split import perform_splits
 import config
 from sklearn.preprocessing import StandardScaler
 import joblib
 import pickle
+
+from config import *
+
 
 
 # # Load and split dataset using spatial methods
@@ -19,10 +22,10 @@ import pickle
 # signal_cols = ["rsrq", "rsrp", "rssi", "sinr"]
 
 # Define function to train models and compute ensemble
-def train_and_evaluate(train_df, test_df, target_col="rsrp", position_cols=0):
+def train_and_evaluate(train_df, test_df, target_col="rssi", position_cols=["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]):
 
     # print("Columns in train_df:", list(train_df.columns))
-    # print("position_cols:", position_cols)
+    print("ens-position_cols:", position_cols)
     # print("target_col:", target_col)
 
     X_train, y_train = train_df[position_cols], train_df[target_col]
@@ -66,8 +69,8 @@ def train_and_evaluate(train_df, test_df, target_col="rsrp", position_cols=0):
     # Evaluate performance
     def evaluate(y_true, y_pred):
         
-
-        mae = mean_absolute_error(y_true, y_pred)
+        mae = median_absolute_error(y_true, y_pred)
+        # mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         return {"MAE": mae, "RMSE": rmse}
 
@@ -82,13 +85,13 @@ def train_and_evaluate(train_df, test_df, target_col="rsrp", position_cols=0):
 # results_random = train_and_evaluate(train_random, test_random)
 # results_block = train_and_evaluate(train_block, test_block)
 
-def perform_ensemble(target = "rsrp", size=0.2, train_random=0, test_random=0, train_block=0, test_block=0):
+def perform_ensemble(target = "rsrp", size=0.2, train_random=0, test_random=0, train_block=0, test_block=0, position_cols=[], signal_cols=[]):
     # Load and split dataset using spatial methods
     # train_random, test_random, train_block, test_block = perform_splits(filename="CONF/cleaned_spiral.csv", this_test_size=size)
 
     # Features and target selection
-    position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
-    signal_cols = ["rsrq", "rsrp", "rssi", "sinr"]
+    # position_cols = ["gps.lat", "gps.lon", "localPosition.x", "localPosition.y", "localPosition.z"]
+    # signal_cols = ["rsrq", "rsrp", "rssi", "sinr"]
 
     # Evaluate on both random and block-based splits
     results_random = train_and_evaluate(train_random, test_random, target_col=target, position_cols=position_cols)
